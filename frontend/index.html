@@ -46,9 +46,9 @@
 		</div>
 
 		<div class="card" id="gen-card" style="display:none">
-			<h3>Try Gemini</h3>
+			<h3>Personalized Chat</h3>
 			<label>Prompt</label>
-			<textarea id="prompt" rows="3">Say hello in one short line.</textarea>
+			<textarea id="prompt" rows="3">Hi there, I am here to talk.</textarea>
 			<div style="margin-top:12px">
 				<button id="genBtn">Generate</button>
 			</div>
@@ -63,14 +63,6 @@
 			<div class="small">3 passages × 5 MCQs; starts at A2; CEFR A1–C2; KET/PET/FCE targets; uses Gemini 2.0 flash-lite.</div>
 			<div style="margin-top:12px">
 				<a href="/app/read/" target="_self">Open Reading Module</a>
-			</div>
-		</div>
-
-		<div class="card">
-			<h3>Writing</h3>
-			<div class="small">1 prompt aligned to CEFR band; text or image input; OCR → LLM scoring on content, organization, language control, range; annotated feedback. Uses Gemini 2.5 flash-lite.</div>
-			<div style="margin-top:12px">
-				<a href="/app/write/" target="_self">Open Writing Module</a>
 			</div>
 		</div>
 
@@ -95,6 +87,14 @@
 			<div class="small">15 prompts; starts at A2; difficulty adapts; uses Gemini 2.5 flash-lite.</div>
 			<div style="margin-top:12px">
 				<a href="/app/speaking/" target="_self">Open Speaking Module</a>
+			</div>
+		</div>
+
+		<div class="card">
+			<h3>Writing</h3>
+			<div class="small">1 prompt aligned to CEFR band; text or image input; OCR → LLM scoring on content, organization, language control, range; annotated feedback. Uses Gemini 2.5 flash-lite.</div>
+			<div style="margin-top:12px">
+				<a href="/app/write/" target="_self">Open Writing Module</a>
 			</div>
 		</div>
 
@@ -141,8 +141,9 @@
 		$('genBtn').disabled = true; $('out').textContent = '…';
 		try {
 			const r = await fetch('/gemini/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ prompt: $('prompt').value }) });
-			const t = await r.text();
-			$('out').textContent = t;
+			if (!r.ok) throw new Error('request failed');
+			const j = await r.json();
+			$('out').textContent = j && typeof j.text === 'string' ? j.text : '';
 		} catch (e) {
 			$('out').textContent = String(e);
 		} finally {

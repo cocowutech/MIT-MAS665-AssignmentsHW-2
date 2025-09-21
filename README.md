@@ -66,7 +66,7 @@ Visit:
 - Speaking page: `http://127.0.0.1:8000/app/speaking/`
   - Model: Gemini 2.5 Flash-Lite
 
-## Login and try Gemini
+## Login and talk
 Default seed user (from `.env`):
 - username: `rong_wu`
 - password: `mit!23456`
@@ -107,7 +107,7 @@ TOKEN=... # paste access_token from previous step
 curl -s -X POST http://127.0.0.1:8000/gemini/generate \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"prompt":"Say hello in one short line."}'
+  -d '{"prompt":"Hi there, I am here to talk."}'
 ```
 
 ## Product spec endpoints

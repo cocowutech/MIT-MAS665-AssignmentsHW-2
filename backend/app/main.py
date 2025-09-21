@@ -30,7 +30,7 @@ app.include_router(speaking.router)
 # Static frontend at /app
 app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
 
-@app.get("/")
+@app.get("/info")
 def root():
 	return {"status": "ok", "gemini_configured": bool(settings.gemini_api_key)}
 
