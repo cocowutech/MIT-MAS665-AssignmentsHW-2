@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Writing Task</title>
+	<style>
+		body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
+		.container { max-width: 920px; margin: 0 auto; padding: 24px; }
+		.card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 20px; margin-top: 16px; }
+		label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c7d2fe; }
+		input, textarea, select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
+		button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
+		button:disabled { opacity: 0.6; cursor: not-allowed; }
+		.row { display: flex; gap: 12px; align-items: center; }
+		.row > * { flex: 1; }
+		.small { color: #93c5fd; font-size: 12px; }
+		pre { white-space: pre-wrap; word-break: break-word; background: #0a0f1f; border: 1px solid #1e2a55; padding: 12px; border-radius: 8px; }
+		a { color: #93c5fd; }
+		.inline-annot { background: #062b2b; border-left: 3px solid #0ea5e9; padding: 6px 8px; margin: 6px 0; }
+	</style>
+</head>
+<body>
+	<div class="container">
+		<div style="display:flex; justify-content: space-between; align-items: center;">
+			<h2>Writing Task</h2>
+			<div>
+				<a href="/app" class="small">Home</a>
+			</div>
+		</div>
+
+		<div class="card" id="auth-card">
+			<h3>Authenticate</h3>
+			<div class="row">
+				<div>
+					<label>Username</label>
+					<input id="username" placeholder="username" value="rong_wu" />
+				</div>
+				<div>
+					<label>Password</label>
+					<input id="password" type="password" placeholder="password" value="mit!23456" />
+				</div>
+			</div>
+			<div style="margin-top:12px">
+				<button id="loginBtn">Login</button>
+				<span id="loginMsg" class="small" style="margin-left:8px"></span>
+			</div>
+		</div>
+
+		<div class="card" id="prompt-card" style="display:none">
+			<h3>Generate Prompt</h3>
+			<div class="row">
+				<div>
+					<label>CEFR Band</label>
+					<select id="band">
+						<option value="A2">A2</option>
+						<option value="B1" selected>B1</option>
+						<option value="B2">B2</option>
+						<option value="C1">C1</option>
+					</select>
+				</div>
+				<div>
+					<label>Topic (optional)</label>
+					<input id="topic" placeholder="e.g., travel, school, hobbies" />
+				</div>
+			</div>
+			<div style="margin-top:12px">
+				<button id="genPromptBtn">Generate Prompt</button>
+			</div>
+			<div style="margin-top:12px">
+				<label>Prompt</label>
+				<pre id="promptOut"></pre>
+				<div class="small" id="targetsOut"></div>
+			</div>
+		</div>
+
+		<div class="card" id="write-card" style="display:none">
+			<h3>Write or Upload</h3>
+			<label>Your Writing</label>
+			<textarea id="essay" rows="8" placeholder="Type your response here or upload an image below..."></textarea>
+			<div class="row" style="margin-top:12px">
+				<button id="scoreTextBtn">Score Text</button>
+				<input type="file" id="imageFile" accept="image/*" />
+				<button id="scoreImageBtn">OCR + Score Image</button>
+			</div>
+		</div>
+
+		<div class="card" id="result-card" style="display:none">
+			<h3>Result</h3>
+			<div id="bandOut" class="small"></div>
+			<pre id="resultOut"></pre>
+			<div id="inlineOut"></div>
+		</div>
+	</div>
+
+	<script>
+	const $ = (id) => document.getElementById(id);
+	let token = null;
+	let lastBand = 'B1';
+
+	$('loginBtn').addEventListener('click', async () => {
+		$('loginBtn').disabled = true; $('loginMsg').textContent = '…';
+		try {
+			const form = new URLSearchParams();
+			form.set('username', $('username').value);
+			form.set('password', $('password').value);
+			const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+			if (!r.ok) throw new Error('login failed');
+			const j = await r.json();
+			token = j.access_token;
+			$('loginMsg').textContent = 'Logged in';
+			$('prompt-card').style.display = 'block';
+			$('write-card').style.display = 'block';
+		} catch (e) {
+			$('loginMsg').textContent = 'Login failed';
+		} finally {
+			$('loginBtn').disabled = false;
+		}
+	});
+
+	$('genPromptBtn').addEventListener('click', async () => {
+		$('genPromptBtn').disabled = true; $('promptOut').textContent = '…'; $('targetsOut').textContent = '';
+		try {
+			const r = await fetch('/write/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ band: $('band').value, topic: $('topic').value || null }) });
+			const j = await r.json();
+			$('promptOut').textContent = (j && typeof j.prompt === 'string' && j.prompt.trim()) ? j.prompt : 'Prompt not available';
+			lastBand = j.band || $('band').value;
+			const targets = j.targets || {};
+			$('targetsOut').textContent = `Exam: ${j.exam_task || ''} | Vocab: ${(targets.target_vocab||[]).join(', ')} | Structures: ${(targets.target_structures||[]).join(', ')}`;
+		} catch (e) {
+			$('promptOut').textContent = String(e);
+		} finally {
+			$('genPromptBtn').disabled = false;
+		}
+	});
+
+	$('scoreTextBtn').addEventListener('click', async () => {
+		$('scoreTextBtn').disabled = true; $('result-card').style.display = 'block'; $('resultOut').textContent = '…'; $('inlineOut').innerHTML = '';
+		try {
+			const r = await fetch('/write/score/text', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ text: $('essay').value, band_hint: lastBand }) });
+			const t = await r.text();
+			let j = null;
+			try { j = JSON.parse(t); } catch { j = { raw: t }; }
+			if (j.band) $('bandOut').textContent = `Band estimate: ${j.band}`; else $('bandOut').textContent = '';
+			$('resultOut').textContent = JSON.stringify(j, null, 2);
+			if (j.comments && Array.isArray(j.comments.inline)) {
+				$('inlineOut').innerHTML = j.comments.inline.map(a => `<div class="inline-annot"><strong>${a.span||''}</strong><div class="small">${a.comment||''}</div></div>`).join('');
+			}
+		} catch (e) {
+			$('resultOut').textContent = String(e);
+		} finally {
+			$('scoreTextBtn').disabled = false;
+		}
+	});
+
+	$('scoreImageBtn').addEventListener('click', async () => {
+		const f = $('imageFile').files[0];
+		if (!f) { alert('Choose an image first'); return; }
+		$('scoreImageBtn').disabled = true; $('result-card').style.display = 'block'; $('resultOut').textContent = '…'; $('inlineOut').innerHTML = '';
+		try {
+			const form = new FormData();
+			form.append('file', f);
+			if (lastBand) form.append('band_hint', lastBand);
+			const r = await fetch('/write/score/image', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form });
+			const t = await r.text();
+			let j = null;
+			try { j = JSON.parse(t); } catch { j = { raw: t }; }
+			if (j.band) $('bandOut').textContent = `Band estimate: ${j.band}`; else $('bandOut').textContent = '';
+			$('resultOut').textContent = JSON.stringify(j, null, 2);
+			if (j.comments && Array.isArray(j.comments.inline)) {
+				$('inlineOut').innerHTML = j.comments.inline.map(a => `<div class="inline-annot"><strong>${a.span||''}</strong><div class="small">${a.comment||''}</div></div>`).join('');
+			}
+		} catch (e) {
+			$('resultOut').textContent = String(e);
+		} finally {
+			$('scoreImageBtn').disabled = false;
+		}
+	});
+	</script>
+</body>
+</html>
+
+

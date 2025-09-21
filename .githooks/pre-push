@@ -1,0 +1,10 @@
+#!/bin/sh
+expected_name="RONG WU"
+expected_email="cocowutech@users.noreply.github.com"
+last_name=$(git log -1 --format='%an' 2>/dev/null || echo "")
+last_email=$(git log -1 --format='%ae' 2>/dev/null || echo "")
+if [ -n "$last_name" ] && { [ "$last_name" != "$expected_name" ] || [ "$last_email" != "$expected_email" ]; }; then
+  echo "Push blocked: last commit must be by $expected_name <$expected_email>." 1>&2
+  exit 1
+fi
+exit 0

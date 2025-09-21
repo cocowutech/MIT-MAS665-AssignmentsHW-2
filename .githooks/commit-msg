@@ -1,0 +1,12 @@
+#!/bin/sh
+expected_name="RONG WU"
+expected_email="cocowutech@users.noreply.github.com"
+ident=$(git var GIT_AUTHOR_IDENT 2>/dev/null || echo "")
+name=$(printf "%s" "$ident" | sed -E 's/^([^<]+) <.*$/\1/' | sed 's/[ \t]*$//')
+email=$(printf "%s" "$ident" | sed -E 's/^.*<([^>]+)>.*/\1/')
+if [ "$name" != "$expected_name" ] || [ "$email" != "$expected_email" ]; then
+  echo "Commit blocked: author must be $expected_name <$expected_email>." 1>&2
+  echo "Current: $name <$email>" 1>&2
+  exit 1
+fi
+exit 0

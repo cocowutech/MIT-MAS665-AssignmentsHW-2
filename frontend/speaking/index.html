@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Speaking (Adaptive)</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
+        .container { max-width: 820px; margin: 0 auto; padding: 24px; }
+        .card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 20px; margin-top: 16px; }
+        label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c7d2fe; }
+        input, textarea { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
+        button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .row { display: flex; gap: 12px; align-items: center; }
+        .row > * { flex: 1; }
+        .small { color: #93c5fd; font-size: 12px; }
+        .timer { font-variant-numeric: tabular-nums; }
+        audio { width: 100%; margin-top: 8px; }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        a { color: #93c5fd; }
+    </style>
+    <script>
+        const $ = (id) => document.getElementById(id);
+        let token = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let countdownInterval = null;
+
+        async function login(username, password){
+            const form = new URLSearchParams();
+            form.set('username', username);
+            form.set('password', password);
+            const r = await fetch('/auth/token', { method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body: form });
+            if(!r.ok) throw new Error('login failed');
+            const j = await r.json();
+            return j.access_token;
+        }
+
+        async function startSession(){
+            const r = await fetch('/speaking/start', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ start_level: 'A2' }) });
+            if(!r.ok) throw new Error('start failed');
+            return await r.json();
+        }
+
+        function msToS(ms){ return Math.max(0, Math.ceil(ms/1000)); }
+
+        async function startPrepAndRecord(prepSeconds, recordSeconds){
+            $('prepTimer').textContent = prepSeconds;
+            $('recordTimer').textContent = recordSeconds;
+            $('prep').style.display = 'block';
+            $('record').style.display = 'none';
+
+            if(countdownInterval) clearInterval(countdownInterval);
+            let remaining = prepSeconds;
+            countdownInterval = setInterval(() => {
+                remaining -= 1;
+                $('prepTimer').textContent = remaining;
+                if(remaining <= 0){
+                    clearInterval(countdownInterval);
+                    beginRecording(recordSeconds);
+                }
+            }, 1000);
+        }
+
+        async function beginRecording(recordSeconds){
+            $('prep').style.display = 'none';
+            $('record').style.display = 'block';
+            $('recordBtn').disabled = true;
+            recordedChunks = [];
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) recordedChunks.push(e.data); };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+                $('audioPlayback').src = URL.createObjectURL(blob);
+                $('submitCorrect').disabled = false;
+                $('submitIncorrect').disabled = false;
+            };
+            mediaRecorder.start();
+
+            let remaining = parseInt($('recordTimer').textContent, 10) || 60;
+            if(countdownInterval) clearInterval(countdownInterval);
+            countdownInterval = setInterval(() => {
+                remaining -= 1;
+                $('recordTimer').textContent = remaining;
+                if(remaining <= 0){ stopRecording(); }
+            }, 1000);
+        }
+
+        function stopRecording(){
+            if(countdownInterval) clearInterval(countdownInterval);
+            if(mediaRecorder && mediaRecorder.state !== 'inactive'){
+                mediaRecorder.stop();
+            }
+            $('recordBtn').disabled = false;
+        }
+
+        async function submitAnswer(sessionId, itemId, wasCorrect){
+            $('submitCorrect').disabled = true;
+            $('submitIncorrect').disabled = true;
+            const r = await fetch('/speaking/answer', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, item_id: itemId, was_correct: wasCorrect }) });
+            if(!r.ok) throw new Error('submit failed');
+            return await r.json();
+        }
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            $('loginBtn').addEventListener('click', async () => {
+                $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
+                try{
+                    token = await login($('username').value, $('password').value);
+                    $('loginMsg').textContent = 'Logged in';
+                    $('module').style.display = 'block';
+                }catch(e){
+                    $('loginMsg').textContent = 'Login failed';
+                }finally{
+                    $('loginBtn').disabled = false;
+                }
+            });
+
+            let session = null;
+
+            $('startBtn').addEventListener('click', async () => {
+                $('startBtn').disabled = true; $('status').textContent = 'Starting…';
+                try{
+                    session = await startSession();
+                    $('status').textContent = `Level: ${session.level} (${session.progress_current}/${session.progress_total})`;
+                    $('prompt').textContent = session.item.prompt;
+                    $('guidance').textContent = session.item.guidance || '';
+                    $('audioPlayback').src = '';
+                    $('submitCorrect').disabled = true;
+                    $('submitIncorrect').disabled = true;
+                    $('recordBtn').onclick = () => beginRecording(session.item.record_seconds);
+                    await startPrepAndRecord(session.item.prep_seconds, session.item.record_seconds);
+                    $('sessionId').value = session.session_id;
+                    $('itemId').value = session.item.id;
+                }catch(e){
+                    $('status').textContent = 'Failed to start session';
+                }finally{
+                    $('startBtn').disabled = false;
+                }
+            });
+
+            $('stopBtn').addEventListener('click', () => stopRecording());
+
+            $('submitCorrect').addEventListener('click', async () => {
+                try{
+                    const resp = await submitAnswer($('sessionId').value, $('itemId').value, true);
+                    handleAnswer(resp);
+                }catch(e){
+                    alert('Submit failed');
+                }
+            });
+            $('submitIncorrect').addEventListener('click', async () => {
+                try{
+                    const resp = await submitAnswer($('sessionId').value, $('itemId').value, false);
+                    handleAnswer(resp);
+                }catch(e){
+                    alert('Submit failed');
+                }
+            });
+
+            function handleAnswer(resp){
+                $('status').textContent = `Level: ${resp.level} (${resp.progress_current}/${resp.progress_total})`;
+                if(resp.finished){
+                    $('prompt').textContent = 'Finished!';
+                    $('guidance').textContent = '';
+                    $('prep').style.display = 'none';
+                    $('record').style.display = 'none';
+                    return;
+                }
+                const item = resp.item;
+                $('prompt').textContent = item.prompt;
+                $('guidance').textContent = item.guidance || '';
+                $('audioPlayback').src = '';
+                $('submitCorrect').disabled = true;
+                $('submitIncorrect').disabled = true;
+                $('sessionId').value = session.session_id;
+                $('itemId').value = item.id;
+                startPrepAndRecord(item.prep_seconds, item.record_seconds);
+            }
+        });
+    </script>
+    </head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Speaking (Adaptive)</h2>
+            <a href="/app/">Home</a>
+        </div>
+        <div class="card">
+            <h3>Login</h3>
+            <div class="row">
+                <div>
+                    <label>Username</label>
+                    <input id="username" placeholder="username" value="rong_wu" />
+                </div>
+                <div>
+                    <label>Password</label>
+                    <input id="password" type="password" placeholder="password" value="mit!23456" />
+                </div>
+            </div>
+            <div style="margin-top:12px">
+                <button id="loginBtn">Login</button>
+                <span id="loginMsg" class="small" style="margin-left:8px"></span>
+            </div>
+        </div>
+
+        <div id="module" class="card" style="display:none">
+            <div class="row" style="justify-content: space-between;">
+                <div id="status" class="small">Not started</div>
+                <button id="startBtn">Start Session</button>
+            </div>
+
+            <div style="margin-top:12px">
+                <div class="small">Prompt</div>
+                <div id="prompt" style="margin-top:6px"></div>
+                <div id="guidance" class="small" style="margin-top:8px"></div>
+            </div>
+
+            <div id="prep" style="margin-top:12px; display:none">
+                <div>Preparation… <span class="timer" id="prepTimer">30</span>s</div>
+            </div>
+
+            <div id="record" style="margin-top:12px; display:none">
+                <div>Recording… <span class="timer" id="recordTimer">60</span>s</div>
+                <div class="row" style="margin-top:8px">
+                    <button id="stopBtn">Stop</button>
+                    <button id="recordBtn">Record</button>
+                </div>
+                <audio id="audioPlayback" controls></audio>
+                <div class="row" style="margin-top:8px">
+                    <button id="submitCorrect" disabled>I did well</button>
+                    <button id="submitIncorrect" disabled>I struggled</button>
+                </div>
+                <input id="sessionId" type="hidden" />
+                <input id="itemId" type="hidden" />
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
+

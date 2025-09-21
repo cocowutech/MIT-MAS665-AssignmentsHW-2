@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Adaptive Reading</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
+        .container { max-width: 880px; margin: 0 auto; padding: 24px; }
+        .card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 20px; margin-top: 16px; }
+        label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c7d2fe; }
+        input, select, textarea { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
+        button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .row { display: flex; gap: 12px; align-items: center; }
+        .row > * { flex: 1; }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        .small { color: #93c5fd; font-size: 12px; }
+        pre { white-space: pre-wrap; word-break: break-word; background: #0a0f1f; border: 1px solid #1e2a55; padding: 12px; border-radius: 8px; }
+        .choices { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
+        .choice { background: #0f172a; border: 1px solid #334155; padding: 10px; border-radius: 8px; cursor: pointer; }
+        .choice.correct { border-color: #10b981; }
+        .choice.incorrect { border-color: #ef4444; }
+        a { color: #93c5fd; }
+    </style>
+ </head>
+ <body>
+   <div class="container">
+     <div class="header">
+       <h2>Adaptive Reading Module</h2>
+       <div><a href="/app" class="small">Home</a></div>
+     </div>
+
+     <div class="card" id="login-card">
+       <h3>Login</h3>
+       <div class="row">
+         <div>
+           <label>Username</label>
+           <input id="username" placeholder="username" value="rong_wu" />
+         </div>
+         <div>
+           <label>Password</label>
+           <input id="password" type="password" placeholder="password" value="mit!23456" />
+         </div>
+       </div>
+       <div style="margin-top:12px">
+         <button id="loginBtn">Login</button>
+         <span id="loginMsg" class="small" style="margin-left:8px"></span>
+       </div>
+     </div>
+
+     <div class="card" id="start-card" style="display:none">
+       <h3>Start Session</h3>
+       <div class="row">
+         <div class="small">Starting at CEFR A2 (KET). Difficulty adapts based on your answers.</div>
+         <div style="align-self:flex-end">
+           <button id="startBtn">Start</button>
+         </div>
+       </div>
+       <div id="startMsg" class="small"></div>
+     </div>
+
+     <div class="card" id="passage-card" style="display:none">
+       <h3>Passage</h3>
+       <pre id="passage"></pre>
+       <div class="small" id="levelInfo"></div>
+     </div>
+
+     <div class="card" id="question-card" style="display:none">
+       <div class="row" style="justify-content:space-between">
+         <div><h3 id="qHeader">Question</h3></div>
+         <div class="small" id="qMeta"></div>
+       </div>
+       <div id="qText"></div>
+       <div class="choices" id="choices"></div>
+       <div id="feedback" class="small" style="margin-top:8px"></div>
+     </div>
+
+     <div class="card" id="finish-card" style="display:none">
+       <h3>Finished</h3>
+       <div id="summary"></div>
+     </div>
+   </div>
+
+   <script>
+    const $ = (id) => document.getElementById(id);
+    let token = null;
+    let sessionId = null;
+    let lastQuestionId = null;
+   let currentPassageIndex = 1;
+   let maxPassages = 3;
+   let questionsPerPassage = 5;
+   let totalQuestions = 15;
+
+    $('loginBtn').addEventListener('click', async () => {
+      $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
+      try {
+        const form = new URLSearchParams();
+        form.set('username', $('username').value);
+        form.set('password', $('password').value);
+        const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+        if (!r.ok) throw new Error('login failed');
+        const j = await r.json(); token = j.access_token;
+        $('loginMsg').textContent = 'Logged in';
+        $('start-card').style.display = 'block';
+      } catch (e) {
+        $('loginMsg').textContent = 'Login failed';
+      } finally { $('loginBtn').disabled = false; }
+    });
+
+    $('startBtn').addEventListener('click', async () => {
+      $('startBtn').disabled = true; $('startMsg').textContent = 'Starting…';
+      try {
+        const r = await fetch('/read/session/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({})
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const j = await r.json();
+        sessionId = j.session_id;
+        $('passage').textContent = j.passage;
+        currentPassageIndex = j.passage_index;
+        maxPassages = j.max_passages;
+        questionsPerPassage = j.questions_per_passage;
+        totalQuestions = j.total_questions;
+        $('levelInfo').textContent = `Passage ${currentPassageIndex}/${maxPassages} • Target: CEFR ${j.target_cefr} (${j.cambridge_level}) • ${questionsPerPassage} Q per passage • Total: ${totalQuestions}`;
+        renderQuestion(j.question);
+        $('passage-card').style.display = 'block';
+        $('question-card').style.display = 'block';
+        $('startMsg').textContent = '';
+      } catch (e) {
+        $('startMsg').textContent = String(e);
+      } finally { $('startBtn').disabled = false; }
+    });
+
+    function renderQuestion(q) {
+      if (!q) return;
+      lastQuestionId = q.id;
+      $('qHeader').textContent = `Question ${q.number}`;
+      $('qMeta').textContent = `CEFR ${q.level_cefr} (${q.cambridge_level}) • Passage ${currentPassageIndex}/${maxPassages}`;
+      $('qText').textContent = q.text;
+      $('feedback').textContent = '';
+      const container = $('choices');
+      container.innerHTML = '';
+      q.choices.forEach((choice, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'choice';
+        btn.textContent = choice;
+        btn.onclick = () => submit(idx);
+        container.appendChild(btn);
+      });
+    }
+
+    async function submit(choiceIndex) {
+      const buttons = Array.from(document.querySelectorAll('.choice'));
+      buttons.forEach(b => b.disabled = true);
+      $('feedback').textContent = 'Checking…';
+      try {
+        const r = await fetch('/read/session/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ session_id: sessionId, question_id: lastQuestionId, choice_index: choiceIndex })
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const j = await r.json();
+        const correctIdx = j.correct_choice_index;
+        buttons.forEach((b, idx) => {
+          if (idx === correctIdx) b.classList.add('correct');
+          if (idx === choiceIndex && idx !== correctIdx) b.classList.add('incorrect');
+        });
+        $('feedback').textContent = (j.correct ? 'Correct. ' : 'Incorrect. ') + (j.rationale || '');
+        if (j.finished) {
+          $('finish-card').style.display = 'block';
+          $('summary').textContent = `Total ${j.summary.total}. Correct ${j.summary.correct}. Incorrect ${j.summary.incorrect}. Start ${j.summary.start_cefr} → End ${j.summary.end_cefr}.`;
+        } else if (j.next_question) {
+          if (j.new_passage) {
+            currentPassageIndex = j.passage_index;
+            maxPassages = j.max_passages;
+            questionsPerPassage = j.questions_per_passage;
+            $('passage').textContent = j.new_passage;
+            $('levelInfo').textContent = `Passage ${currentPassageIndex}/${maxPassages} • Target: CEFR ${j.updated_target_cefr} (${j.cambridge_level}) • ${questionsPerPassage} Q per passage • Total: ${totalQuestions}`;
+          }
+          setTimeout(() => renderQuestion(j.next_question), 600);
+        }
+      } catch (e) {
+        $('feedback').textContent = String(e);
+      }
+    }
+   </script>
+ </body>
+ </html>
+
+

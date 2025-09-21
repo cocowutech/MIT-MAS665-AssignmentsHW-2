@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Listening Module</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
+        .container { max-width: 900px; margin: 0 auto; padding: 24px; }
+        .card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 20px; margin-top: 16px; }
+        label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c7d2fe; }
+        input, select, textarea { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
+        button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
+        button.secondary { background: #334155; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .row { display: flex; gap: 12px; align-items: center; }
+        .row > * { flex: 1; }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        .small { color: #93c5fd; font-size: 12px; }
+        .choices { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
+        .choice { background: #0a0f1f; border: 1px solid #1e2a55; padding: 10px; border-radius: 8px; display: flex; align-items: center; gap: 10px; }
+        .pill { display: inline-block; background: #1e2a55; color: #c7d2fe; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-left: 6px; }
+        a { color: #93c5fd; }
+        .flex { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        .clip-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .rationale { color:#9ca3af; font-size:13px; margin-top:6px; }
+        .section-title { margin: 0 0 8px 0; }
+        .badge { background:#0a0f1f; border:1px solid #1e2a55; padding:2px 8px; border-radius:999px; font-size:12px; color:#93c5fd; }
+    </style>
+    <script>
+        const $ = (id) => document.getElementById(id);
+        let token = null;
+        let sessionId = null;
+        let clips = [];
+        let synth = null;
+        let speakingClipId = null;
+
+        function initTTS() {
+            synth = window.speechSynthesis || null;
+            if (!synth) {
+                $('ttsWarning').textContent = 'Browser TTS not available. Audio playback disabled.';
+            }
+        }
+
+        function speakClip(clipId) {
+            if (!synth) return;
+            stopSpeaking();
+            const clip = clips.find(c => c.id === clipId);
+            if (!clip) return;
+            const utter = new SpeechSynthesisUtterance(clip.transcript);
+            utter.rate = 0.95; // slight slow for clarity
+            utter.pitch = 1.0;
+            utter.onend = () => { speakingClipId = null; updatePlayButtons(); };
+            speakingClipId = clipId;
+            synth.speak(utter);
+            updatePlayButtons();
+        }
+
+        function stopSpeaking() {
+            if (!synth) return;
+            synth.cancel();
+            speakingClipId = null;
+            updatePlayButtons();
+        }
+
+        function updatePlayButtons() {
+            for (const c of clips) {
+                const btn = $('play-' + c.id);
+                if (!btn) continue;
+                btn.textContent = speakingClipId === c.id ? 'Stop' : 'Play';
+            }
+        }
+
+        async function login() {
+            $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
+            try {
+                const form = new URLSearchParams();
+                form.set('username', $('username').value);
+                form.set('password', $('password').value);
+                const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+                if (!r.ok) throw new Error('login failed');
+                const j = await r.json();
+                token = j.access_token;
+                $('loginMsg').textContent = 'Logged in';
+                $('session-card').style.display = 'block';
+            } catch (e) {
+                $('loginMsg').textContent = 'Login failed';
+            } finally {
+                $('loginBtn').disabled = false;
+            }
+        }
+
+        function renderClips() {
+            const root = $('clipsRoot');
+            root.innerHTML = '';
+            clips.forEach((clip, idx) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div class="clip-header">
+                        <h3 class="section-title">Clip ${idx + 1}: ${clip.title}</h3>
+                        <div class="flex">
+                            <span class="badge">CEFR ${clip.level_cefr}</span>
+                            <span class="badge">${clip.cambridge_level}</span>
+                            <span class="badge">${clip.exam_task_type}</span>
+                        </div>
+                    </div>
+                    <div class="flex" style="margin:8px 0 12px 0">
+                        <button id="play-${clip.id}">Play</button>
+                        <button class="secondary" id="show-${clip.id}">Show transcript</button>
+                    </div>
+                    <div id="tx-${clip.id}" class="small" style="display:none">${clip.transcript.replace(/</g,'&lt;')}</div>
+                    <div style="margin-top:8px">
+                        <div style="margin-bottom:6px">${clip.question}</div>
+                        <div class="choices">
+                            ${clip.choices.map((ch, i) => `
+                                <label class="choice">
+                                    <input type="radio" name="ans-${clip.id}" value="${i}" />
+                                    <span>${String.fromCharCode(65 + i)}. ${ch.replace(/</g,'&lt;')}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+                root.appendChild(card);
+                $('play-' + clip.id).addEventListener('click', () => {
+                    if (speakingClipId === clip.id) { stopSpeaking(); } else { speakClip(clip.id); }
+                });
+                $('show-' + clip.id).addEventListener('click', () => {
+                    const tx = $('tx-' + clip.id);
+                    const vis = tx.style.display !== 'none';
+                    tx.style.display = vis ? 'none' : 'block';
+                });
+            });
+            updatePlayButtons();
+        }
+
+        async function startSession() {
+            $('startBtn').disabled = true; $('startMsg').textContent = '…';
+            try {
+                const level = $('level').value;
+                const r = await fetch('/listen/session/start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ level_cefr: level }) });
+                if (!r.ok) throw new Error('start failed');
+                const j = await r.json();
+                sessionId = j.session_id;
+                clips = j.clips || [];
+                $('startMsg').textContent = `Target CEFR: ${j.target_cefr} (${j.cambridge_level})`;
+                $('clips-card').style.display = 'block';
+                renderClips();
+            } catch (e) {
+                $('startMsg').textContent = 'Start failed';
+            } finally {
+                $('startBtn').disabled = false;
+            }
+        }
+
+        async function submitAnswers() {
+            $('submitBtn').disabled = true; $('submitMsg').textContent = '…';
+            try {
+                const answers = clips.map(c => {
+                    const el = document.querySelector(`input[name="ans-${c.id}"]:checked`);
+                    const idx = el ? parseInt(el.value) : -1;
+                    return { clip_id: c.id, choice_index: idx };
+                });
+                const r = await fetch('/listen/session/submit', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, answers }) });
+                const t = await r.text();
+                $('result').textContent = t;
+                $('submitMsg').textContent = '';
+            } catch (e) {
+                $('result').textContent = String(e);
+            } finally {
+                $('submitBtn').disabled = false;
+            }
+        }
+
+        window.addEventListener('load', () => {
+            initTTS();
+            $('loginBtn').addEventListener('click', login);
+            $('startBtn').addEventListener('click', startSession);
+            $('submitBtn').addEventListener('click', submitAnswers);
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Listening Module</h2>
+            <div class="small"><a href="/app">Home</a></div>
+        </div>
+
+        <div class="card">
+            <div id="ttsWarning" class="small"></div>
+            <div class="small">Endpoints: <code>/listen/session/start</code>, <code>/listen/session/submit</code></div>
+        </div>
+
+        <div class="card" id="login-card">
+            <h3>Login</h3>
+            <div class="row">
+                <div>
+                    <label>Username</label>
+                    <input id="username" placeholder="username" value="rong_wu" />
+                </div>
+                <div>
+                    <label>Password</label>
+                    <input id="password" type="password" placeholder="password" value="mit!23456" />
+                </div>
+            </div>
+            <div style="margin-top:12px">
+                <button id="loginBtn">Login</button>
+                <span id="loginMsg" class="small" style="margin-left:8px"></span>
+            </div>
+        </div>
+
+        <div class="card" id="session-card" style="display:none">
+            <h3>Start</h3>
+            <div class="row">
+                <div>
+                    <label>Target CEFR</label>
+                    <select id="level">
+                        <option value="A1">A1</option>
+                        <option value="A2" selected>A2</option>
+                        <option value="B1">B1</option>
+                        <option value="B2">B2</option>
+                        <option value="C1">C1</option>
+                        <option value="C2">C2</option>
+                    </select>
+                </div>
+                <div style="align-self:flex-end">
+                    <button id="startBtn">Start Listening Task</button>
+                </div>
+            </div>
+            <div class="small" id="startMsg" style="margin-top:8px"></div>
+        </div>
+
+        <div class="card" id="clips-card" style="display:none">
+            <h3>Clips & Questions</h3>
+            <div id="clipsRoot"></div>
+            <div style="margin-top:12px">
+                <button id="submitBtn">Submit Answers</button>
+                <span id="submitMsg" class="small" style="margin-left:8px"></span>
+            </div>
+            <div style="margin-top:12px">
+                <label>Result</label>
+                <pre id="result"></pre>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
+
