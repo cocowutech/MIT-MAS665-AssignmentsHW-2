@@ -14,10 +14,10 @@ Base = declarative_base()
 
 
 def get_db():
-\tdb = SessionLocal()
-\ttry:
-\t	yield db
-\tfinally:
-\t\tdb.close()
+	db = SessionLocal()
+	try:
+		yield db
+	finally:
+		db.close()
 
 
