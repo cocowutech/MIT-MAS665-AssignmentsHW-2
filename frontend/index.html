@@ -24,7 +24,7 @@
 	<div class="container">
 		<div class="header">
 			<h2>Adaptive Placement Agent</h2>
-			<div id="status" class="small">Checking…</div>
+			<div class="small"><span id="status">Checking…</span> · <span id="authState">Logged out</span> <button id="logoutBtn" style="display:none;margin-left:8px">Logout</button></div>
 		</div>
 
 		<div class="card" id="login-card">
@@ -41,6 +41,7 @@
 			</div>
 			<div style="margin-top:12px">
 				<button id="loginBtn">Login</button>
+				<button id="registerBtn" style="margin-left:8px">Register</button>
 				<span id="loginMsg" class="small" style="margin-left:8px"></span>
 			</div>
 		</div>
@@ -105,7 +106,29 @@
 
 	<script>
 	const $ = (id) => document.getElementById(id);
-	let token = null;
+	let token = localStorage.getItem('token');
+	let username = localStorage.getItem('username');
+
+	function updateAuthUI() {
+		if (token) {
+			$('authState').textContent = username ? `Logged in as ${username}` : 'Logged in';
+			$('logoutBtn').style.display = 'inline-block';
+			$('login-card').style.display = 'none';
+			$('gen-card').style.display = 'block';
+		} else {
+			$('authState').textContent = 'Logged out';
+			$('logoutBtn').style.display = 'none';
+			$('login-card').style.display = 'block';
+			$('gen-card').style.display = 'none';
+		}
+	}
+
+	function handleAuthFailure() {
+		token = null;
+		username = null;
+		try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch (_) {}
+		updateAuthUI();
+	}
 
 	async function checkHealth() {
 		try {
@@ -128,8 +151,10 @@
 			if (!r.ok) throw new Error('login failed');
 			const j = await r.json();
 			token = j.access_token;
-			$('loginMsg').textContent = 'Logged in';
-			$('gen-card').style.display = 'block';
+			username = $('username').value || null;
+			try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch (_) {}
+			$('loginMsg').textContent = username ? `Logged in as ${username}` : 'Logged in';
+			updateAuthUI();
 		} catch (e) {
 			$('loginMsg').textContent = 'Login failed';
 		} finally {
@@ -137,10 +162,33 @@
 		}
 	});
 
+	$('registerBtn').addEventListener('click', async () => {
+		$('registerBtn').disabled = true; $('loginMsg').textContent = 'Registering…';
+		try {
+			const payload = { username: $('username').value, password: $('password').value };
+			const r = await fetch('/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+			if (r.status === 409) { $('loginMsg').textContent = 'Username already exists'; return; }
+			if (!r.ok) throw new Error('registration failed');
+			$('loginMsg').textContent = 'Registration successful. Logging in…';
+			// Auto-login after register
+			$('loginBtn').click();
+		} catch (e) {
+			$('loginMsg').textContent = 'Registration failed';
+		} finally {
+			$('registerBtn').disabled = false;
+		}
+	});
+
+	$('logoutBtn').addEventListener('click', () => {
+		handleAuthFailure();
+		$('loginMsg').textContent = '';
+	});
+
 	$('genBtn').addEventListener('click', async () => {
 		$('genBtn').disabled = true; $('out').textContent = '…';
 		try {
 			const r = await fetch('/gemini/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ prompt: $('prompt').value }) });
+			if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
 			if (!r.ok) throw new Error('request failed');
 			const j = await r.json();
 			$('out').textContent = j && typeof j.text === 'string' ? j.text : '';
@@ -151,6 +199,7 @@
 		}
 	});
 
+	updateAuthUI();
 	checkHealth();
 	</script>
 </body>

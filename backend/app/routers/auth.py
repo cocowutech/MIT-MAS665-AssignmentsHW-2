@@ -8,6 +8,9 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from ..settings import settings
+from sqlalchemy.orm import Session
+from ..db import get_db
+from ..models import AuthUser
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -38,12 +41,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 	return pwd_context.verify(plain_password, hashed_password)
 
 
-def authenticate_user(username: str, password: str) -> Optional[User]:
+def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
+	# Try DB-backed users first
+	user_row = db.query(AuthUser).filter(AuthUser.username == username).first()
+	if user_row and verify_password(password, user_row.password_hash):
+		return User(username=username)
+	# Fallback to seed in-memory user for dev convenience
 	_ensure_seed_user()
 	hashed = _users.get(username)
-	if not hashed or not verify_password(password, hashed):
-		return None
-	return User(username=username)
+	if hashed and verify_password(password, hashed):
+		return User(username=username)
+	return None
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -55,8 +63,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 @router.post("/token", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-	user = authenticate_user(form_data.username, form_data.password)
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+	user = authenticate_user(db, form_data.username, form_data.password)
 	if not user:
 		raise HTTPException(status_code=401, detail="Incorrect username or password")
 	access_token = create_access_token({"sub": user.username})
@@ -73,5 +81,29 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
 	except JWTError:
 		raise credentials_exception
 	return User(username=username)
+
+
+class RegisterRequest(BaseModel):
+	username: str
+	password: str
+
+
+@router.post("/register", status_code=201)
+async def register(req: RegisterRequest, db: Session = Depends(get_db)):
+	username = (req.username or "").strip()
+	password = req.password or ""
+	if not username or not password:
+		raise HTTPException(status_code=400, detail="username and password are required")
+	if len(username) < 3 or len(username) > 128:
+		raise HTTPException(status_code=400, detail="username must be 3-128 characters")
+	# Check exists
+	existing = db.query(AuthUser).filter(AuthUser.username == username).first()
+	if existing:
+		raise HTTPException(status_code=409, detail="username already exists")
+	# Create user
+	row = AuthUser(username=username, password_hash=pwd_context.hash(password))
+	db.add(row)
+	db.commit()
+	return {"ok": True}
 
 

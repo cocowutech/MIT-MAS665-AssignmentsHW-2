@@ -4,6 +4,15 @@ from sqlalchemy import Column, String, DateTime, Integer, Text, UniqueConstraint
 from .db import Base
 
 
+class AuthUser(Base):
+	__tablename__ = "auth_users"
+	# Primary key is username
+	username = Column(String(128), primary_key=True, index=True)
+	password_hash = Column(String(256), nullable=False)
+	created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+	updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class UserAccount(Base):
 	__tablename__ = "user_accounts"
 	# Primary key is username for simplicity (unique single identifier)
