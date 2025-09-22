@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Your Grade</title>
+	<style>
+		body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
+		.container { max-width: 900px; margin: 0 auto; padding: 24px; }
+		.card { background: #111833; border: 1px solid #1e2a55; border-radius: 16px; padding: 24px; margin-top: 16px; }
+		.header { display: flex; justify-content: space-between; align-items: center; }
+		.small { color: #93c5fd; font-size: 12px; }
+		.grade-box { display: flex; align-items: center; justify-content: center; height: 220px; border-radius: 16px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 2px solid #334155; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+		.grade-text { font-size: 88px; font-weight: 800; letter-spacing: 2px; color: #e2e8f0; text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+		.pill { display: inline-block; padding: 6px 10px; border-radius: 999px; background: #0ea5e9; color: #001018; font-weight: 600; }
+		.meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+		.meta .item { background: #0a0f1f; border: 1px solid #1e2a55; border-radius: 12px; padding: 12px; }
+		button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
+	</style>
+</head>
+<body>
+	<div class="container">
+		<div class="header">
+			<h2>Placement Result</h2>
+			<div class="small"><a href="/app" class="small">Home</a></div>
+		</div>
+
+		<div class="card">
+			<div class="small">Session</div>
+			<input id="sessionId" placeholder="paste session_id" style="width:100%; margin-top:6px" />
+			<div style="margin-top:12px"><button id="fetchBtn">Fetch Result</button></div>
+		</div>
+
+		<div class="card" id="resultCard" style="display:none">
+			<div class="grade-box"><div id="gradeText" class="grade-text">—</div></div>
+			<div style="margin-top:12px"><span id="examPill" class="pill">—</span></div>
+			<div class="meta">
+				<div class="item"><div class="small">Start</div><div id="startCefr">—</div></div>
+				<div class="item"><div class="small">End</div><div id="endCefr">—</div></div>
+				<div class="item"><div class="small">Correct</div><div id="correctCnt">—</div></div>
+				<div class="item"><div class="small">Incorrect</div><div id="incorrectCnt">—</div></div>
+				<div class="item"><div class="small">Asked</div><div id="askedCnt">—</div></div>
+				<div class="item"><div class="small">Total</div><div id="totalCnt">—</div></div>
+			</div>
+		</div>
+	</div>
+
+	<script>
+	const $ = (id) => document.getElementById(id);
+	let token = localStorage.getItem('token');
+
+	function cambridgeFor(cefr) {
+		const m = { A1: 'KET', A2: 'KET', B1: 'PET', B2: 'FCE', C1: 'FCE', C2: 'FCE' };
+		return m[cefr] || '—';
+	}
+
+	$('fetchBtn').addEventListener('click', async () => {
+		const sid = $('sessionId').value.trim();
+		if (!sid) { alert('Enter session_id'); return; }
+		$('fetchBtn').disabled = true;
+		try {
+			const r = await fetch(`/read/summary?session_id=${encodeURIComponent(sid)}`, { headers: { 'Authorization': token ? `Bearer ${token}` : undefined } });
+			if (!r.ok) throw new Error(await r.text());
+			const j = await r.json();
+			$('resultCard').style.display = 'block';
+			$('gradeText').textContent = j.end_cefr || '—';
+			$('examPill').textContent = cambridgeFor(j.end_cefr);
+			$('startCefr').textContent = j.start_cefr || '—';
+			$('endCefr').textContent = j.end_cefr || '—';
+			$('correctCnt').textContent = j.correct ?? '—';
+			$('incorrectCnt').textContent = j.incorrect ?? '—';
+			$('askedCnt').textContent = j.asked ?? '—';
+			$('totalCnt').textContent = j.total ?? '—';
+		} catch (e) {
+			alert(String(e));
+		} finally {
+			$('fetchBtn').disabled = false;
+		}
+	});
+	</script>
+</body>
+</html>
+
+
