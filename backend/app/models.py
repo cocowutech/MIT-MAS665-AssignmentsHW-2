@@ -9,6 +9,10 @@ class AuthUser(Base):
 	# Primary key is username
 	username = Column(String(128), primary_key=True, index=True)
 	password_hash = Column(String(256), nullable=False)
+	email = Column(String(256), nullable=True)
+	phone = Column(String(32), nullable=True)
+	requests_used = Column(Integer, default=0, nullable=False)
+	requests_limit = Column(Integer, default=1000, nullable=False)
 	created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 	updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

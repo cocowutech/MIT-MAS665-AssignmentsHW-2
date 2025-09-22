@@ -41,7 +41,7 @@
 			</div>
 			<div style="margin-top:12px">
 				<button id="loginBtn">Login</button>
-				<button id="registerBtn" style="margin-left:8px">Register</button>
+				<a id="registerLink" href="/register" style="margin-left:8px">Register</a>
 				<span id="loginMsg" class="small" style="margin-left:8px"></span>
 			</div>
 		</div>
@@ -162,22 +162,7 @@
 		}
 	});
 
-	$('registerBtn').addEventListener('click', async () => {
-		$('registerBtn').disabled = true; $('loginMsg').textContent = 'Registering…';
-		try {
-			const payload = { username: $('username').value, password: $('password').value };
-			const r = await fetch('/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-			if (r.status === 409) { $('loginMsg').textContent = 'Username already exists'; return; }
-			if (!r.ok) throw new Error('registration failed');
-			$('loginMsg').textContent = 'Registration successful. Logging in…';
-			// Auto-login after register
-			$('loginBtn').click();
-		} catch (e) {
-			$('loginMsg').textContent = 'Registration failed';
-		} finally {
-			$('registerBtn').disabled = false;
-		}
-	});
+	// Registration moved to /register; no handler here
 
 	$('logoutBtn').addEventListener('click', () => {
 		handleAuthFailure();

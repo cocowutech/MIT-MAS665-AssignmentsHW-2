@@ -41,7 +41,7 @@ class Question(BaseModel):
 
 
 class StartRequest(BaseModel):
-    start_level: Optional[str] = Field(default="A2", description="Initial CEFR level A1–C2")
+    start_level: Optional[str] = Field(default="B1", description="Initial CEFR level A1–C2")
 
 
 class StartResponse(BaseModel):
@@ -124,41 +124,53 @@ JSON schema to return exactly:
 }}
 """.strip()
 
-    # Use Gemini 2.0 Flash-Lite specifically for this module
-    client = GeminiClient(model="gemini-2.0-flash-lite")
-    try:
-        raw = await client.generate(prompt)
-    finally:
-        await client.aclose()
+    last_error: Optional[Exception] = None
+    for _ in range(2):
+        # Use Gemini 2.0 Flash-Lite specifically for this module
+        client = GeminiClient(model="gemini-2.0-flash-lite")
+        try:
+            raw = await client.generate(prompt)
+            try:
+                data = _extract_json_block(raw)
+            except Exception as e:
+                last_error = e
+                continue
 
-    data = _extract_json_block(raw)
+            passage = str(data.get("passage", "")).strip()
+            question_text = str(data.get("question", "")).strip()
+            options = data.get("options") or []
+            answer_index = data.get("answer_index")
+            rationale = (data.get("rationale") or "").strip() or None
 
-    passage = str(data.get("passage", "")).strip()
-    question_text = str(data.get("question", "")).strip()
-    options = data.get("options") or []
-    answer_index = data.get("answer_index")
-    rationale = (data.get("rationale") or "").strip() or None
+            if not passage or not question_text or not isinstance(options, list) or len(options) != 4:
+                last_error = ValueError("invalid item format")
+                continue
+            try:
+                answer_index_int = int(answer_index)
+            except Exception as e:
+                last_error = e
+                continue
+            if not (0 <= answer_index_int < 4):
+                last_error = ValueError("answer index out of range")
+                continue
 
-    if not passage or not question_text or not isinstance(options, list) or len(options) != 4:
-        raise HTTPException(status_code=502, detail="Gemini returned invalid item format")
-    try:
-        answer_index_int = int(answer_index)
-    except Exception:
-        raise HTTPException(status_code=502, detail="Gemini returned invalid answer index")
-    if not (0 <= answer_index_int < 4):
-        raise HTTPException(status_code=502, detail="Gemini answer index out of range")
+            q = Question(
+                id=uuid.uuid4().hex,
+                cefr=level,
+                exam_target=exam,
+                passage=passage,
+                question=question_text,
+                options=[str(o) for o in options],
+                answer_index=answer_index_int,
+                rationale=rationale,
+            )
+            return q
+        finally:
+            await client.aclose()
 
-    q = Question(
-        id=uuid.uuid4().hex,
-        cefr=level,
-        exam_target=exam,
-        passage=passage,
-        question=question_text,
-        options=[str(o) for o in options],
-        answer_index=answer_index_int,
-        rationale=rationale,
-    )
-    return q
+    # If we reach here, both attempts failed
+    msg = f"LLM parse/format error: {last_error}" if last_error else "LLM error"
+    raise HTTPException(status_code=502, detail=msg)
 
 
 def _adjust_level(state: _SessionState, was_correct: bool) -> None:
@@ -184,8 +196,8 @@ def _adjust_level(state: _SessionState, was_correct: bool) -> None:
 
 @router.post("/start", response_model=StartResponse)
 async def start(req: StartRequest, user: User = Depends(get_current_user)):
-    # Force starting level to A2 regardless of client input
-    level = "A2"
+    # Force starting level to B1 regardless of client input
+    level = "B1"
     state = _SessionState(level_index=LEVELS.index(level), total=15)
     _sessions[state.session_id] = state
 

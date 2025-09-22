@@ -5,7 +5,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..gemini_client import GeminiClient
 from .auth import User, get_current_user
@@ -22,7 +22,7 @@ CAMBRIDGE_BY_CEFR: Dict[str, str] = {"A1": "KET", "A2": "KET", "B1": "PET", "B2"
 
 
 class StartRequest(BaseModel):
-    level_cefr: Optional[str] = None  # Ignored; sessions always start at A2
+    start_level: Optional[str] = Field(default="B1", description="Initial CEFR level A1–C2")
 
 
 class SubmitRequest(BaseModel):
@@ -61,6 +61,7 @@ class SessionState:
         self.incorrect_streak = 0
         self.questions: List[Dict[str, Any]] = []  # Each has: id, number, text, choices, correct_index, rationale, cefr
         self.ended = False
+        self.last_outcomes: List[bool] = []  # rolling window of last N (5) outcomes across session
 
     def next_number(self) -> int:
         return self.num_asked + 1
@@ -175,9 +176,22 @@ def _step_difficulty(state: SessionState, was_correct: bool) -> None:
             state.incorrect_streak = 0
 
 
+def _adjust_final_by_last_five(current_cefr: str, outcomes: List[bool]) -> str:
+    # Adjust one level up or down based on last up-to-5 answers
+    if not outcomes:
+        return current_cefr
+    correct = sum(1 for o in outcomes[-5:] if o)
+    idx = CEFR_ORDER.index(current_cefr)
+    if correct >= 4:
+        idx = min(idx + 1, len(CEFR_ORDER) - 1)
+    elif correct <= 1:
+        idx = max(idx - 1, 0)
+    return CEFR_ORDER[idx]
+
+
 @router.post("/session/start")
 async def start_session(req: StartRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    level = "A2"
+    level = _validate_cefr(getattr(req, "start_level", None))
     session_id = uuid.uuid4().hex
     client = GeminiClient(model="gemini-2.0-flash-lite")
     try:
@@ -249,6 +263,11 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
     else:
         state.incorrect_count += 1
 
+    # Track rolling last 5 outcomes
+    state.last_outcomes.append(was_correct)
+    if len(state.last_outcomes) > 5:
+        state.last_outcomes.pop(0)
+
     # Determine if this was the last question of the current passage
     end_of_passage = (state.questions_in_passage_asked >= state.questions_per_passage)
 
@@ -280,8 +299,11 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
         state.questions_in_passage_asked = 0
         state.correct_in_passage = 0
 
-        # If we have completed all passages, end session
+        # If we have completed all passages, finalize session and adjust by last five
         if state.passage_index > state.max_passages:
+            # Final refresh based on last five outcomes
+            state.current_cefr = _adjust_final_by_last_five(state.current_cefr, state.last_outcomes)
+            state.cambridge_level = CAMBRIDGE_BY_CEFR[state.current_cefr]
             state.ended = True
         else:
             # Generate next passage and first question
@@ -403,6 +425,26 @@ async def get_state(session_id: str, user: User = Depends(get_current_user)):
             if state.questions
             else None
         ),
+    }
+
+
+@router.get("/summary")
+async def get_summary(session_id: str, user: User = Depends(get_current_user)):
+    state = _sessions.get(session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # If not ended, provide current snapshot; if ended, it's the final
+    end_cefr = state.current_cefr if state.ended else _adjust_final_by_last_five(state.current_cefr, state.last_outcomes)
+    return {
+        "session_id": state.session_id,
+        "finished": state.ended,
+        "total": state.max_questions,
+        "asked": state.num_asked,
+        "correct": state.correct_count,
+        "incorrect": state.incorrect_count,
+        "start_cefr": state.start_cefr,
+        "end_cefr": end_cefr,
+        "cambridge_level": CAMBRIDGE_BY_CEFR[end_cefr],
     }
 
 

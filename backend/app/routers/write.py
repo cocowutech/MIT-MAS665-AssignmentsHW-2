@@ -4,6 +4,9 @@ from pydantic import BaseModel
 from typing import Any, Dict, Optional
 from ..gemini_client import GeminiClient
 from .auth import get_current_user, User
+from sqlalchemy.orm import Session
+from ..db import get_db
+from ..models import ReadModule
 
 try:
 	import pytesseract  # type: ignore
@@ -17,7 +20,7 @@ except Exception:
 router = APIRouter(prefix="/write", tags=["writing"])
 
 
-CEFR_BANDS = ["A2", "B1", "B2", "C1"]
+CEFR_BANDS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
 
 class GeneratePromptRequest(BaseModel):
@@ -39,12 +42,22 @@ class ScoreTextRequest(BaseModel):
 
 def _map_band_to_exam(band: str) -> str:
 	band = band.upper()
-	if band == "A2":
+	if band in ("A1", "A2"):
 		return "KET"
 	if band == "B1":
 		return "PET"
 	# For B2 and C1, map to FCE with stretch targets for C1
 	return "FCE"
+
+
+_CEFR_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
+def _average_band(levels: list[str]) -> str:
+	if not levels:
+		return "B1"
+	idxs = [max(0, min(_CEFR_ORDER.index(l) if l in _CEFR_ORDER else 2, len(_CEFR_ORDER)-1)) for l in levels]
+	avg = round(sum(idxs) / len(idxs))
+	return _CEFR_ORDER[avg]
 
 
 def _build_prompt_generation_prompt(band: str, topic: Optional[str]) -> str:
@@ -108,6 +121,19 @@ async def generate_prompt(req: GeneratePromptRequest, user: User = Depends(get_c
 		)
 	finally:
 		await client.aclose()
+
+
+@router.get("/default_band")
+async def default_band(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	levels: list[str] = []
+	try:
+		rm = db.get(ReadModule, user.username)
+		if rm and rm.end_cefr:
+			levels.append(str(rm.end_cefr))
+	except Exception:
+		pass
+	band = _average_band(levels)
+	return {"band": band}
 
 
 @router.post("/score/text")

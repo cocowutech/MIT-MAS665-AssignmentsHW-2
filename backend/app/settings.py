@@ -4,7 +4,7 @@ from pydantic import Field
 class Settings(BaseSettings):
 	gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
 	# Provider can be "vertex" (Vertex AI Express) or "ai_studio" (Generative Language API)
-	gemini_provider: str = Field(default="vertex", validation_alias="GEMINI_PROVIDER")
+	gemini_provider: str = Field(default="ai_studio", validation_alias="GEMINI_PROVIDER")
 	# Model to use, default to Gemini 2.5 Flash
 	gemini_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_MODEL")
 	# Optional: model override specifically for listening module

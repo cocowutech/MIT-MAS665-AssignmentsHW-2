@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from sqlalchemy.orm import Session
-from .db import Base, engine, get_db
+from .db import Base, engine, get_db, ensure_schema
 from .cleanup import purge_older_than_one_week
 from fastapi.staticfiles import StaticFiles
 from .settings import settings
@@ -29,6 +29,7 @@ app.include_router(speaking.router)
 
 # Static frontend at /app
 app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
+app.mount("/register", StaticFiles(directory="frontend/register", html=True), name="register")
 
 @app.get("/info")
 def root():
@@ -77,6 +78,11 @@ async def start_idle_watcher():
 	asyncio.create_task(_idle_watcher())
 	# Initialize DB schema
 	Base.metadata.create_all(bind=engine)
+	# Apply lightweight dev migrations
+	try:
+		ensure_schema()
+	except Exception:
+		pass
 	# Best-effort weekly cleanup at startup
 	try:
 		db = next(get_db())

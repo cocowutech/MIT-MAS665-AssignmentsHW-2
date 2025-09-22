@@ -15,10 +15,22 @@
         button:disabled { opacity: 0.6; cursor: not-allowed; }
         .row { display: flex; gap: 12px; align-items: center; }
         .row > * { flex: 1; }
+        /* Session row layout tweaks to center the selector and button nicely */
+        .session-row { justify-content: center; }
+        .session-row > * { flex: 0 0 auto; }
+        .session-row > div:first-child { display:flex; flex-direction:column; align-items:center; }
+        /* Center the selected text in the CEFR dropdown and set a compact width */
+        #level { width: 180px; text-align: center; text-align-last: center; -moz-text-align-last: center; }
         .header { display: flex; justify-content: space-between; align-items: center; }
         .small { color: #93c5fd; font-size: 12px; }
         .choices { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
         .choice { background: #0a0f1f; border: 1px solid #1e2a55; padding: 10px; border-radius: 8px; display: flex; align-items: center; gap: 10px; }
+        /* New, more elegant selectable cards for choices */
+        .choice-card { background: #0a0f1f; border: 1px solid #1e2a55; padding: 10px; border-radius: 8px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease; }
+        .choice-card:hover { border-color: #3756b3; }
+        .choice-card.selected { border-color: #60a5fa; background: #0b162d; }
+        .choice-key { width: 24px; height: 24px; border-radius: 999px; background: #1e2a55; color: #c7d2fe; display: flex; align-items: center; justify-content: center; font-weight: 600; flex: 0 0 24px; }
+        .choice-text { color: #e5e7eb; }
         .pill { display: inline-block; background: #1e2a55; color: #c7d2fe; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-left: 6px; }
         a { color: #93c5fd; }
         .flex { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
@@ -26,14 +38,24 @@
         .rationale { color:#9ca3af; font-size:13px; margin-top:6px; }
         .section-title { margin: 0 0 8px 0; }
         .badge { background:#0a0f1f; border:1px solid #1e2a55; padding:2px 8px; border-radius:999px; font-size:12px; color:#93c5fd; }
+        /* Results */
+        .result-card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 12px; }
+        .stats { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+        .stat { background: #0a0f1f; border: 1px solid #1e2a55; border-radius: 8px; padding: 6px 10px; }
+        .ok { color: #22c55e; }
+        .bad { color: #ef4444; }
+        .per-item { margin-top: 8px; }
     </style>
     <script>
         const $ = (id) => document.getElementById(id);
-        let token = null;
+        let token = localStorage.getItem('token');
+        let username = localStorage.getItem('username');
         let sessionId = null;
         let clips = [];
         let synth = null;
         let speakingClipId = null;
+        let remaining = 0;
+        let asked = 0;
 
         function initTTS() {
             synth = window.speechSynthesis || null;
@@ -81,6 +103,8 @@
                 if (!r.ok) throw new Error('login failed');
                 const j = await r.json();
                 token = j.access_token;
+                username = $('username').value || null;
+                try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch(_) {}
                 $('loginMsg').textContent = 'Logged in';
                 $('session-card').style.display = 'block';
             } catch (e) {
@@ -112,12 +136,12 @@
                     <div id="tx-${clip.id}" class="small" style="display:none">${clip.transcript.replace(/</g,'&lt;')}</div>
                     <div style="margin-top:8px">
                         <div style="margin-bottom:6px">${clip.question}</div>
-                        <div class="choices">
+                        <div class="choices" id="choices-${clip.id}">
                             ${clip.choices.map((ch, i) => `
-                                <label class="choice">
-                                    <input type="radio" name="ans-${clip.id}" value="${i}" />
-                                    <span>${String.fromCharCode(65 + i)}. ${ch.replace(/</g,'&lt;')}</span>
-                                </label>
+                                <div class="choice-card" data-clip="${clip.id}" data-index="${i}">
+                                    <div class="choice-key">${String.fromCharCode(65 + i)}</div>
+                                    <div class="choice-text">${ch.replace(/</g,'&lt;')}</div>
+                                </div>
                             `).join('')}
                         </div>
                     </div>
@@ -131,20 +155,49 @@
                     const vis = tx.style.display !== 'none';
                     tx.style.display = vis ? 'none' : 'block';
                 });
+                // Wire up choice selection
+                const choiceEls = card.querySelectorAll('.choice-card');
+                choiceEls.forEach(el => {
+                    el.addEventListener('click', () => {
+                        const idx = parseInt(el.getAttribute('data-index'));
+                        selectChoice(clip.id, idx);
+                    });
+                });
+                // Reflect any existing selection
+                if (Number.isInteger(clip._selected)) {
+                    highlightSelection(clip.id, clip._selected);
+                }
             });
             updatePlayButtons();
+        }
+
+        function highlightSelection(clipId, index) {
+            const container = $('choices-' + clipId);
+            if (!container) return;
+            container.querySelectorAll('.choice-card').forEach((el, i) => {
+                if (i === index) el.classList.add('selected'); else el.classList.remove('selected');
+            });
+        }
+
+        function selectChoice(clipId, index) {
+            const clip = clips.find(c => c.id === clipId);
+            if (!clip) return;
+            clip._selected = index;
+            highlightSelection(clipId, index);
         }
 
         async function startSession() {
             $('startBtn').disabled = true; $('startMsg').textContent = '…';
             try {
                 const level = $('level').value;
-                const r = await fetch('/listen/session/start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ level_cefr: level }) });
+                const r = await fetch('/listen/session/start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ start_level: level }) });
                 if (!r.ok) throw new Error('start failed');
                 const j = await r.json();
                 sessionId = j.session_id;
                 clips = j.clips || [];
-                $('startMsg').textContent = `Target CEFR: ${j.target_cefr} (${j.cambridge_level})`;
+                asked = parseInt(j.asked || 0);
+                remaining = parseInt(j.remaining || (10 - asked));
+                $('startMsg').textContent = `Level: ${j.target_cefr} (${j.cambridge_level}) • Questions: ${asked}/${asked + remaining}`;
                 $('clips-card').style.display = 'block';
                 renderClips();
             } catch (e) {
@@ -157,23 +210,95 @@
         async function submitAnswers() {
             $('submitBtn').disabled = true; $('submitMsg').textContent = '…';
             try {
-                const answers = clips.map(c => {
-                    const el = document.querySelector(`input[name="ans-${c.id}"]:checked`);
-                    const idx = el ? parseInt(el.value) : -1;
-                    return { clip_id: c.id, choice_index: idx };
-                });
+                // Ensure each clip has a selection before submitting
+                const missing = clips.filter(c => !Number.isInteger(c._selected));
+                if (missing.length) {
+                    $('submitMsg').textContent = 'Please select an answer for all clips.';
+                    return;
+                }
+                const answers = clips.map(c => ({ clip_id: c.id, choice_index: c._selected }));
                 const r = await fetch('/listen/session/submit', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, answers }) });
-                const t = await r.text();
-                $('result').textContent = t;
-                $('submitMsg').textContent = '';
+                if (!r.ok) {
+                    const errText = await r.text();
+                    $('submitMsg').textContent = 'Submit failed';
+                    $('result').innerHTML = `<div class="result-card">${errText.replace(/</g,'&lt;')}</div>`;
+                    return;
+                }
+                const j = await r.json();
+                if (j.finished) {
+                    renderResult(j);
+                    $('submitMsg').textContent = '';
+                    $('clipsRoot').innerHTML = '';
+                } else {
+                    clips = j.clips || [];
+                    clips.forEach(c => { c._selected = undefined; });
+                    asked = parseInt(j.asked || 0);
+                    remaining = parseInt(j.remaining || (10 - asked));
+                    $('startMsg').textContent = `Level: ${j.target_cefr} (${j.cambridge_level}) • Questions: ${asked}/${asked + remaining}`;
+                    $('submitMsg').textContent = 'Next set loaded. Continue.';
+                    renderClips();
+                }
             } catch (e) {
-                $('result').textContent = String(e);
+                $('result').innerHTML = `<div class="result-card">${String(e).replace(/</g,'&lt;')}</div>`;
             } finally {
                 $('submitBtn').disabled = false;
             }
         }
 
+        function renderResult(res) {
+            const correct = parseInt(res.correct) || 0;
+            const incorrect = parseInt(res.incorrect) || 0;
+            const total = parseInt(res.total) || (correct + incorrect);
+            const band = res.final_level || res.estimated_band || '-';
+            const exam = (res.exam_mapping && res.exam_mapping.exam) || '-';
+            const vocab = (res.exam_mapping && res.exam_mapping.target_vocab) || [];
+            const structs = (res.exam_mapping && res.exam_mapping.target_structures) || [];
+
+            const per = Array.isArray(res.per_item) ? res.per_item : [];
+            const perHtml = per.map((p, i) => `
+                <div class="small per-item">Item ${i + 1} • <span class="${p.correct ? 'ok' : 'bad'}">${p.correct ? 'Correct' : 'Incorrect'}</span> (CEFR ${p.level_cefr}, ${p.cambridge_level})</div>
+            `).join('');
+
+            const vocabHtml = vocab.map(v => `<span class="pill">${String(v).replace(/</g,'&lt;')}</span>`).join(' ');
+            const structsHtml = structs.map(s => `<span class="pill">${String(s).replace(/</g,'&lt;')}</span>`).join(' ');
+
+            const raw = JSON.stringify(res, null, 2).replace(/</g,'&lt;');
+            $('result').innerHTML = `
+                <div class="result-card">
+                    <div class="stats">
+                        <div class="stat">Score: <strong>${correct}/${total}</strong></div>
+                        <div class="stat">Final level: <strong>${band}</strong></div>
+                        <div class="stat">Exam: <strong>${exam}</strong></div>
+                    </div>
+                    ${perHtml}
+                    <div style="margin-top:8px">
+                        <div class="small" style="margin:4px 0">Target vocabulary:</div>
+                        <div class="flex">${vocabHtml || '<span class="small">—</span>'}</div>
+                        <div class="small" style="margin:8px 0 4px 0">Target structures:</div>
+                        <div class="flex">${structsHtml || '<span class="small">—</span>'}</div>
+                    </div>
+                    <details style="margin-top:10px">
+                        <summary class="small">Raw JSON</summary>
+                        <pre style="white-space:pre-wrap">${raw}</pre>
+                    </details>
+                </div>
+            `;
+        }
+
+        function updateAuthHeader(){
+            const st = document.getElementById('authState');
+            const link = document.getElementById('loginLink');
+            if (!st) return;
+            if (token) { st.textContent = username ? `Logged in as ${username}` : 'Logged in'; if (link) link.style.display='none'; }
+            else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
+        }
+
         window.addEventListener('load', () => {
+            if (token) {
+                $('login-card').style.display = 'none';
+                $('session-card').style.display = 'block';
+                updateAuthHeader();
+            }
             initTTS();
             $('loginBtn').addEventListener('click', login);
             $('startBtn').addEventListener('click', startSession);
@@ -185,7 +310,11 @@
     <div class="container">
         <div class="header">
             <h2>Listening Module</h2>
-            <div class="small"><a href="/app">Home</a></div>
+            <div class="small"><a href="/app">Home</a> · <span id="authState">Logged out</span> <a href="/app" id="loginLink">Login</a></div>
+        </div>
+
+        <div class="card">
+            <button onclick="window.location.href = '/app/';">← Back</button>
         </div>
 
         <div class="card">
@@ -213,7 +342,7 @@
 
         <div class="card" id="session-card" style="display:none">
             <h3>Start</h3>
-            <div class="row">
+            <div class="row session-row">
                 <div>
                     <label>Target CEFR</label>
                     <select id="level">
@@ -225,7 +354,7 @@
                         <option value="C2">C2</option>
                     </select>
                 </div>
-                <div style="align-self:flex-end">
+                <div>
                     <button id="startBtn">Start Listening Task</button>
                 </div>
             </div>
@@ -240,8 +369,8 @@
                 <span id="submitMsg" class="small" style="margin-left:8px"></span>
             </div>
             <div style="margin-top:12px">
-                <label>Result</label>
-                <pre id="result"></pre>
+                <h3 class="section-title">Result</h3>
+                <div id="result"></div>
             </div>
         </div>
     </div>

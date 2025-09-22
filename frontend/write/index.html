@@ -18,15 +18,30 @@
 		pre { white-space: pre-wrap; word-break: break-word; background: #0a0f1f; border: 1px solid #1e2a55; padding: 12px; border-radius: 8px; }
 		a { color: #93c5fd; }
 		.inline-annot { background: #062b2b; border-left: 3px solid #0ea5e9; padding: 6px 8px; margin: 6px 0; }
+		/* Prompt box enhancements */
+		.prompt-box { background: #0a0f1f; border: 1px solid #22305f; border-radius: 12px; padding: 16px; }
+		.prompt-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+		.prompt-title { font-size: 16px; font-weight: 600; }
+		.meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+		.meta-item { background: #0f1a39; border: 1px solid #2a3a76; color: #c7d2fe; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+		.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+		.chip { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #0b1837; border: 1px solid #1e2a55; color: #93c5fd; font-size: 12px; }
+		.chip.struct { color: #a7f3d0; border-color: #115e59; background: #062b2b; }
+		.section-title { font-weight: 600; color: #c7d2fe; margin-top: 12px; margin-bottom: 6px; font-size: 13px; }
+		.prompt-body p { margin: 6px 0; }
+		.prompt-body ul, .prompt-body ol { margin: 6px 0 6px 20px; }
+		.small-btn { background: #0f172a; border: 1px solid #334155; color: #e5e7eb; padding: 6px 10px; border-radius: 8px; font-size: 12px; }
 	</style>
 </head>
 <body>
 	<div class="container">
 		<div style="display:flex; justify-content: space-between; align-items: center;">
 			<h2>Writing Task</h2>
-			<div>
-				<a href="/app" class="small">Home</a>
-			</div>
+			<div class="small"><a href="/app" class="small">Home</a> · <span id="authState">Logged out</span> <a href="/app" id="loginLink" class="small">Login</a></div>
+		</div>
+
+		<div class="card">
+			<button onclick="window.location.href = '/app/';">← Back</button>
 		</div>
 
 		<div class="card" id="auth-card">
@@ -53,10 +68,12 @@
 				<div>
 					<label>CEFR Band</label>
 					<select id="band">
+						<option value="A1">A1</option>
 						<option value="A2">A2</option>
 						<option value="B1" selected>B1</option>
 						<option value="B2">B2</option>
 						<option value="C1">C1</option>
+						<option value="C2">C2</option>
 					</select>
 				</div>
 				<div>
@@ -69,8 +86,9 @@
 			</div>
 			<div style="margin-top:12px">
 				<label>Prompt</label>
-				<pre id="promptOut"></pre>
-				<div class="small" id="targetsOut"></div>
+				<div id="promptNice" class="prompt-box" style="display:none"></div>
+				<pre id="promptOut" style="display:none"></pre>
+				<div class="small" id="targetsOut" style="display:none"></div>
 			</div>
 		</div>
 
@@ -95,9 +113,112 @@
 
 	<script>
 	const $ = (id) => document.getElementById(id);
-	let token = null;
+	let token = localStorage.getItem('token');
+	let username = localStorage.getItem('username');
 	let lastBand = 'B1';
 
+	function escapeHTML(str) {
+		return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s]));
+	}
+
+	function recommendedWordRange(band) {
+		const B = (band || 'B1').toUpperCase();
+		switch (B) {
+			case 'A1': return '60–90 words';
+			case 'A2': return '80–120 words';
+			case 'B1': return '100–160 words';
+			case 'B2': return '140–200 words';
+			case 'C1': return '180–240 words';
+			case 'C2': return '220–280 words';
+			default: return '100–160 words';
+		}
+	}
+
+	function formatPromptHTML(text) {
+		const lines = String(text || '').split(/\r?\n/);
+		let html = '';
+		let listType = null; // 'ul' | 'ol' | null
+		for (const raw of lines) {
+			const line = raw.trim();
+			if (line === '') {
+				if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; listType = null; }
+				html += '<br/>';
+				continue;
+			}
+			if (/^\d+\./.test(line)) {
+				if (listType !== 'ol') { if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; } html += '<ol>'; listType = 'ol'; }
+				html += `<li>${escapeHTML(line.replace(/^\d+\.\s*/, ''))}</li>`;
+				continue;
+			}
+			if (/^[-•\u2022]/.test(line)) {
+				if (listType !== 'ul') { if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; } html += '<ul>'; listType = 'ul'; }
+				html += `<li>${escapeHTML(line.replace(/^[-•\u2022]\s*/, ''))}</li>`;
+				continue;
+			}
+			if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; listType = null; }
+			html += `<p>${escapeHTML(line)}</p>`;
+		}
+		if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; }
+		return html;
+	}
+
+	function renderPromptBox(data) {
+		const band = (data && data.band) ? data.band : ($('band').value || 'B1');
+		const examTask = data && data.exam_task ? data.exam_task : 'Task';
+		const promptText = data && data.prompt ? data.prompt : 'Prompt not available';
+		const targets = (data && data.targets) ? data.targets : {};
+		const vocab = Array.isArray(targets.target_vocab) ? targets.target_vocab : [];
+		const structures = Array.isArray(targets.target_structures) ? targets.target_structures : [];
+		const words = recommendedWordRange(band);
+		const chipsHTML = [...vocab.map(v=>`<span class="chip">${escapeHTML(v)}</span>`), ...structures.map(s=>`<span class="chip struct">${escapeHTML(s)}</span>`)].join('');
+		$('promptNice').innerHTML = `
+			<div class="prompt-header">
+				<div>
+					<div class="prompt-title">Your Writing Prompt</div>
+					<div class="meta">
+						<span class="meta-item">Band ${escapeHTML(band)}</span>
+						<span class="meta-item">Task: ${escapeHTML(examTask)}</span>
+						<span class="meta-item">Aim: ${escapeHTML(words)}</span>
+					</div>
+				</div>
+				<button class="small-btn" id="copyPromptBtn">Copy</button>
+			</div>
+			<div class="prompt-body">${formatPromptHTML(promptText)}</div>
+			${chipsHTML ? `<div class="section-title">Targets</div><div class="chips">${chipsHTML}</div>` : ''}
+			<div class="section-title">Instructions</div>
+			<ul class="small">
+				<li>Address all parts of the task.</li>
+				<li>Organize into clear paragraphs and use linking words.</li>
+				<li>Use varied vocabulary and structures appropriate to Band ${escapeHTML(band)}.</li>
+				<li>Check grammar, spelling, and punctuation before submitting.</li>
+				<li>Aim for ${escapeHTML(words)}.</li>
+			</ul>
+		`;
+		$('promptNice').style.display = 'block';
+		const copyBtn = document.getElementById('copyPromptBtn');
+		if (copyBtn && navigator && navigator.clipboard) {
+			copyBtn.onclick = () => navigator.clipboard.writeText(promptText);
+		}
+	}
+
+	function updateAuthHeader(){
+		const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
+		if (!st) return;
+		if (token) { st.textContent = username ? `Logged in as ${username}` : 'Logged in'; if (link) link.style.display='none'; }
+		else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
+	}
+
+	if (token) {
+		$('auth-card').style.display = 'none';
+		$('prompt-card').style.display = 'block';
+		$('write-card').style.display = 'block';
+		updateAuthHeader();
+		// Fetch server-recommended default band if available
+		try {
+			fetch('/write/default_band', { headers: { 'Authorization': `Bearer ${token}` } })
+				.then(r => r.json()).then(j => { if (j && j.band) { $('band').value = j.band; lastBand = j.band; } });
+		} catch (_) {}
+	}
 	$('loginBtn').addEventListener('click', async () => {
 		$('loginBtn').disabled = true; $('loginMsg').textContent = '…';
 		try {
@@ -107,10 +228,12 @@
 			const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
 			if (!r.ok) throw new Error('login failed');
 			const j = await r.json();
-			token = j.access_token;
+			token = j.access_token; username = $('username').value || null;
+			try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch(_) {}
 			$('loginMsg').textContent = 'Logged in';
 			$('prompt-card').style.display = 'block';
 			$('write-card').style.display = 'block';
+			updateAuthHeader();
 		} catch (e) {
 			$('loginMsg').textContent = 'Login failed';
 		} finally {
@@ -119,16 +242,18 @@
 	});
 
 	$('genPromptBtn').addEventListener('click', async () => {
-		$('genPromptBtn').disabled = true; $('promptOut').textContent = '…'; $('targetsOut').textContent = '';
+		$('genPromptBtn').disabled = true;
+		$('promptNice').style.display = 'block';
+		$('promptNice').innerHTML = '<div class="small">Generating prompt…</div>';
+		$('promptOut').style.display = 'none';
+		$('targetsOut').style.display = 'none';
 		try {
 			const r = await fetch('/write/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ band: $('band').value, topic: $('topic').value || null }) });
 			const j = await r.json();
-			$('promptOut').textContent = (j && typeof j.prompt === 'string' && j.prompt.trim()) ? j.prompt : 'Prompt not available';
+			renderPromptBox(j);
 			lastBand = j.band || $('band').value;
-			const targets = j.targets || {};
-			$('targetsOut').textContent = `Exam: ${j.exam_task || ''} | Vocab: ${(targets.target_vocab||[]).join(', ')} | Structures: ${(targets.target_structures||[]).join(', ')}`;
 		} catch (e) {
-			$('promptOut').textContent = String(e);
+			$('promptNice').innerHTML = `<div class="small">Failed to generate prompt: ${escapeHTML(String(e))}</div>`;
 		} finally {
 			$('genPromptBtn').disabled = false;
 		}

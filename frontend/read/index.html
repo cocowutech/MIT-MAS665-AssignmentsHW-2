@@ -26,10 +26,13 @@
  </head>
  <body>
    <div class="container">
-     <div class="header">
-       <h2>Adaptive Reading Module</h2>
-       <div><a href="/app" class="small">Home</a></div>
-     </div>
+    <div class="header">
+      <h2>Adaptive Reading Module</h2>
+      <div class="small"><a href="/app" class="small">Home</a> · <span id="authState">Logged out</span> <a href="/app" id="loginLink" class="small">Login</a></div>
+    </div>
+    <div class="card">
+      <button onclick="window.location.href = '/app/';">← Back</button>
+    </div>
 
      <div class="card" id="login-card">
        <h3>Login</h3>
@@ -82,9 +85,23 @@
      </div>
    </div>
 
-   <script>
-    const $ = (id) => document.getElementById(id);
-    let token = null;
+  <script>
+   const $ = (id) => document.getElementById(id);
+   let token = localStorage.getItem('token');
+   let username = localStorage.getItem('username');
+
+   function updateAuthHeader(){
+     const st = $('authState');
+     const link = $('loginLink');
+     if (!st) return;
+     if (token) {
+       st.textContent = username ? `Logged in as ${username}` : 'Logged in';
+       if (link) link.style.display = 'none';
+     } else {
+       st.textContent = 'Logged out';
+       if (link) link.style.display = 'inline';
+     }
+   }
     let sessionId = null;
     let lastQuestionId = null;
    let currentPassageIndex = 1;
@@ -92,7 +109,24 @@
    let questionsPerPassage = 5;
    let totalQuestions = 15;
 
-    $('loginBtn').addEventListener('click', async () => {
+   function handleAuthFailure(){
+     try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
+     token = null; username = null;
+     $('login-card').style.display = 'block';
+     $('start-card').style.display = 'none';
+     $('passage-card').style.display = 'none';
+     $('question-card').style.display = 'none';
+     $('finish-card').style.display = 'none';
+     updateAuthHeader();
+   }
+
+   if (token) {
+     $('login-card').style.display = 'none';
+     $('start-card').style.display = 'block';
+     updateAuthHeader();
+   }
+
+   $('loginBtn').addEventListener('click', async () => {
       $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
       try {
         const form = new URLSearchParams();
@@ -100,9 +134,12 @@
         form.set('password', $('password').value);
         const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
         if (!r.ok) throw new Error('login failed');
-        const j = await r.json(); token = j.access_token;
-        $('loginMsg').textContent = 'Logged in';
-        $('start-card').style.display = 'block';
+       const j = await r.json(); token = j.access_token; username = $('username').value || null;
+       try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch(_) {}
+       $('loginMsg').textContent = username ? `Logged in as ${username}` : 'Logged in';
+       $('start-card').style.display = 'block';
+       $('login-card').style.display = 'none';
+       updateAuthHeader();
       } catch (e) {
         $('loginMsg').textContent = 'Login failed';
       } finally { $('loginBtn').disabled = false; }
@@ -110,13 +147,14 @@
 
     $('startBtn').addEventListener('click', async () => {
       $('startBtn').disabled = true; $('startMsg').textContent = 'Starting…';
-      try {
+     try {
         const r = await fetch('/read/session/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({})
         });
-        if (!r.ok) throw new Error(await r.text());
+       if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
+       if (!r.ok) throw new Error(await r.text());
         const j = await r.json();
         sessionId = j.session_id;
         $('passage').textContent = j.passage;
@@ -156,13 +194,14 @@
       const buttons = Array.from(document.querySelectorAll('.choice'));
       buttons.forEach(b => b.disabled = true);
       $('feedback').textContent = 'Checking…';
-      try {
+     try {
         const r = await fetch('/read/session/submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({ session_id: sessionId, question_id: lastQuestionId, choice_index: choiceIndex })
         });
-        if (!r.ok) throw new Error(await r.text());
+       if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
+       if (!r.ok) throw new Error(await r.text());
         const j = await r.json();
         const correctIdx = j.correct_choice_index;
         buttons.forEach((b, idx) => {
