@@ -27,6 +27,13 @@
         let mediaRecorder = null;
         let recordedChunks = [];
         let countdownInterval = null;
+        let recognition = null;
+        let isRecording = false;
+        let hasRecordedThisItem = false;
+        let transcriptText = '';
+        let submitTriggered = false;
+        let asrFinalText = '';
+        let session = null;
 
         async function login(username, password){
             const form = new URLSearchParams();
@@ -47,11 +54,30 @@
 
         function msToS(ms){ return Math.max(0, Math.ceil(ms/1000)); }
 
+        function cleanTranscript(text){
+            let s = (text || '').replace(/\s+/g, ' ').trim();
+            if(!s) return s;
+            const patterns = [
+                [/(\b\w+\s+\w+\s+\w+)(?:\s+\1\b)+/gi, '$1'],
+                [/(\b\w+\s+\w+)(?:\s+\1\b)+/gi, '$1'],
+                [/(\b\w+)(?:\s+\1\b)+/gi, '$1'],
+            ];
+            for (const [pat, rep] of patterns) { s = s.replace(pat, rep); }
+            return s.replace(/\s+/g, ' ').trim();
+        }
+
         async function startPrepAndRecord(prepSeconds, recordSeconds){
             $('prepTimer').textContent = prepSeconds;
-            $('recordTimer').textContent = recordSeconds;
+            $('recordTimer').textContent = Math.min(recordSeconds, 60);
             $('prep').style.display = 'block';
             $('record').style.display = 'none';
+            isRecording = false;
+            hasRecordedThisItem = false;
+            transcriptText = '';
+            submitTriggered = false;
+            $('audioPlayback').src = '';
+            $('recordBtn').textContent = 'Start';
+            $('recordBtn').disabled = false;
 
             if(countdownInterval) clearInterval(countdownInterval);
             let remaining = prepSeconds;
@@ -60,24 +86,59 @@
                 $('prepTimer').textContent = remaining;
                 if(remaining <= 0){
                     clearInterval(countdownInterval);
-                    beginRecording(recordSeconds);
+                    // Reveal recording controls and start 5s auto-start countdown
+                    showRecordUI(parseInt($('recordTimer').textContent, 10) || 60);
                 }
             }, 1000);
+        }
+
+        function initASR(){
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if(!SR){
+                const warn = $('asrWarning');
+                if(warn) warn.textContent = 'Speech recognition not supported in this browser.';
+                return null;
+            }
+            const r = new SR();
+            r.lang = 'en-US';
+            r.interimResults = true;
+            r.continuous = true;
+            r.onresult = (event) => {
+                let interimText = '';
+                for(let i = event.resultIndex; i < event.results.length; i++){
+                    const res = event.results[i];
+                    if(res.isFinal){ asrFinalText += res[0].transcript + ' '; }
+                    else { interimText += res[0].transcript; }
+                }
+                transcriptText = (asrFinalText + interimText).trim();
+                const t = $('transcript'); if(t) t.textContent = cleanTranscript(transcriptText);
+            };
+            r.onerror = () => {};
+            r.onend = () => {
+                // Manual submit required; no auto-submit on ASR end
+            };
+            return r;
         }
 
         async function beginRecording(recordSeconds){
             $('prep').style.display = 'none';
             $('record').style.display = 'block';
-            $('recordBtn').disabled = true;
+            $('recordBtn').textContent = 'Stop';
+            $('recordBtn').disabled = false;
+            isRecording = true;
+            const as = $('autostart'); if (as) as.style.display = 'none';
+            transcriptText = '';
+            asrFinalText = '';
             recordedChunks = [];
+            const subBtnHide = $('submitBtn'); if (subBtnHide) subBtnHide.style.display = 'none';
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream);
             mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) recordedChunks.push(e.data); };
             mediaRecorder.onstop = () => {
                 const blob = new Blob(recordedChunks, { type: 'audio/webm' });
                 $('audioPlayback').src = URL.createObjectURL(blob);
-                $('submitCorrect').disabled = false;
-                $('submitIncorrect').disabled = false;
+                // Reveal Submit button after recording stops
+                const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
             };
             mediaRecorder.start();
 
@@ -88,6 +149,9 @@
                 $('recordTimer').textContent = remaining;
                 if(remaining <= 0){ stopRecording(); }
             }, 1000);
+
+            if(!recognition){ recognition = initASR(); }
+            try{ if(recognition) recognition.start(); } catch(_) {}
         }
 
         function stopRecording(){
@@ -95,15 +159,97 @@
             if(mediaRecorder && mediaRecorder.state !== 'inactive'){
                 mediaRecorder.stop();
             }
-            $('recordBtn').disabled = false;
+            try{ if(recognition) recognition.stop(); } catch(_) {}
+            isRecording = false;
+            hasRecordedThisItem = true;
+            $('recordBtn').textContent = 'Start';
+            // Disable to prevent re-recording
+            $('recordBtn').disabled = true;
+            // Show Submit button; user must submit manually
+            const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
         }
 
-        async function submitAnswer(sessionId, itemId, wasCorrect){
-            $('submitCorrect').disabled = true;
-            $('submitIncorrect').disabled = true;
-            const r = await fetch('/speaking/answer', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, item_id: itemId, was_correct: wasCorrect }) });
-            if(!r.ok) throw new Error('submit failed');
+        async function submitAnswer(sessionId, itemId, transcript){
+            const r = await fetch('/speaking/answer', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, item_id: itemId, transcript: transcript }) });
+            if(!r.ok){
+                const msg = await r.text().catch(() => 'submit failed');
+                throw new Error(msg || 'submit failed');
+            }
             return await r.json();
+        }
+
+        function toggleRecording(){
+            if(hasRecordedThisItem) return;
+            if(!isRecording){
+                if(countdownInterval) clearInterval(countdownInterval);
+                const as = $('autostart'); if (as) as.style.display = 'none';
+                beginRecording(parseInt($('recordTimer').textContent, 10) || 60);
+            }else{
+                stopRecording();
+            }
+        }
+
+        function showRecordUI(recordSeconds){
+            $('prep').style.display = 'none';
+            $('record').style.display = 'block';
+            $('recordBtn').textContent = 'Start';
+            $('recordBtn').disabled = false;
+            const subBtn = $('submitBtn'); if (subBtn) subBtn.style.display = 'none';
+            const as = $('autostart');
+            const ast = $('autostartTimer');
+            if (as && ast) {
+                let remain = 5;
+                ast.textContent = remain;
+                as.style.display = 'block';
+                if (countdownInterval) clearInterval(countdownInterval);
+                countdownInterval = setInterval(() => {
+                    if (isRecording) { clearInterval(countdownInterval); return; }
+                    remain -= 1;
+                    ast.textContent = remain;
+                    if (remain <= 0){
+                        clearInterval(countdownInterval);
+                        beginRecording(recordSeconds);
+                    }
+                }, 1000);
+            }
+        }
+
+        async function attemptSubmit(){
+            if (submitTriggered) return;
+            submitTriggered = true;
+            const text = (transcriptText || '').trim();
+            const cleaned = cleanTranscript(text);
+            if (!cleaned) {
+                const warn = $('asrWarning');
+                if (warn) warn.textContent = 'No transcript captured. Please ensure microphone and speech recognition permissions are granted and use a supported browser (Chrome).';
+            }
+            try{
+                const resp = await submitAnswer($('sessionId').value, $('itemId').value, cleaned);
+                handleAnswer(resp);
+            }catch(e){
+                alert(String(e.message || e));
+            }
+        }
+
+        function handleAnswer(resp){
+            const predicted = resp && resp.predicted_level ? String(resp.predicted_level).toUpperCase() : null;
+            $('status').textContent = predicted ? `Level: ${resp.level} (${resp.progress_current}/${resp.progress_total}) · Estimated: ${predicted}` : `Level: ${resp.level} (${resp.progress_current}/${resp.progress_total})`;
+            $('feedback').textContent = resp.feedback || '';
+            if(resp.finished){
+                $('prompt').textContent = 'Finished!';
+                $('guidance').textContent = '';
+                $('prep').style.display = 'none';
+                $('record').style.display = 'none';
+                return;
+            }
+            const item = resp.item;
+            $('prompt').textContent = item.prompt;
+            $('guidance').textContent = item.guidance || '';
+            $('audioPlayback').src = '';
+            $('sessionId').value = session.session_id;
+            $('itemId').value = item.id;
+            startPrepAndRecord(item.prep_seconds, item.record_seconds);
+            const sub = $('submitBtn'); if (sub) { sub.style.display = 'none'; sub.disabled = false; }
         }
 
         window.addEventListener('DOMContentLoaded', async () => {
@@ -132,8 +278,6 @@
                 }
             });
 
-            let session = null;
-
             $('startBtn').addEventListener('click', async () => {
                 $('startBtn').disabled = true; $('status').textContent = 'Starting…';
                 try{
@@ -142,9 +286,9 @@
                     $('prompt').textContent = session.item.prompt;
                     $('guidance').textContent = session.item.guidance || '';
                     $('audioPlayback').src = '';
-                    $('submitCorrect').disabled = true;
-                    $('submitIncorrect').disabled = true;
-                    $('recordBtn').onclick = () => beginRecording(session.item.record_seconds);
+                    $('feedback').textContent = '';
+                    $('recordBtn').onclick = toggleRecording;
+                    const sub = $('submitBtn'); if (sub) { sub.style.display = 'none'; sub.disabled = false; }
                     await startPrepAndRecord(session.item.prep_seconds, session.item.record_seconds);
                     $('sessionId').value = session.session_id;
                     $('itemId').value = session.item.id;
@@ -155,43 +299,20 @@
                 }
             });
 
-            $('stopBtn').addEventListener('click', () => stopRecording());
+            const skipBtn = document.getElementById('skipPrepBtn');
+            if (skipBtn) {
+                skipBtn.addEventListener('click', () => {
+                    if(countdownInterval) clearInterval(countdownInterval);
+                    showRecordUI(parseInt($('recordTimer').textContent, 10) || 60);
+                });
+            }
 
-            $('submitCorrect').addEventListener('click', async () => {
-                try{
-                    const resp = await submitAnswer($('sessionId').value, $('itemId').value, true);
-                    handleAnswer(resp);
-                }catch(e){
-                    alert('Submit failed');
-                }
-            });
-            $('submitIncorrect').addEventListener('click', async () => {
-                try{
-                    const resp = await submitAnswer($('sessionId').value, $('itemId').value, false);
-                    handleAnswer(resp);
-                }catch(e){
-                    alert('Submit failed');
-                }
-            });
-
-            function handleAnswer(resp){
-                $('status').textContent = `Level: ${resp.level} (${resp.progress_current}/${resp.progress_total})`;
-                if(resp.finished){
-                    $('prompt').textContent = 'Finished!';
-                    $('guidance').textContent = '';
-                    $('prep').style.display = 'none';
-                    $('record').style.display = 'none';
-                    return;
-                }
-                const item = resp.item;
-                $('prompt').textContent = item.prompt;
-                $('guidance').textContent = item.guidance || '';
-                $('audioPlayback').src = '';
-                $('submitCorrect').disabled = true;
-                $('submitIncorrect').disabled = true;
-                $('sessionId').value = session.session_id;
-                $('itemId').value = item.id;
-                startPrepAndRecord(item.prep_seconds, item.record_seconds);
+            const submitBtn = document.getElementById('submitBtn');
+            if (submitBtn) {
+                submitBtn.addEventListener('click', async () => {
+                    submitBtn.disabled = true;
+                    try { await attemptSubmit(); } finally { submitBtn.disabled = false; }
+                });
             }
         });
     </script>
@@ -237,19 +358,24 @@
 
             <div id="prep" style="margin-top:12px; display:none">
                 <div>Preparation… <span class="timer" id="prepTimer">30</span>s</div>
+                <div class="row" style="margin-top:8px">
+                    <button id="skipPrepBtn">Skip to recording</button>
+                </div>
             </div>
 
             <div id="record" style="margin-top:12px; display:none">
                 <div>Recording… <span class="timer" id="recordTimer">60</span>s</div>
+                <div id="autostart" class="small" style="margin-top:4px; display:none">Auto-starting in <span class="timer" id="autostartTimer">5</span>s…</div>
+                <div id="asrWarning" class="small" style="margin-top:4px"></div>
                 <div class="row" style="margin-top:8px">
-                    <button id="stopBtn">Stop</button>
-                    <button id="recordBtn">Record</button>
+                    <button id="recordBtn">Start</button>
+                    <button id="submitBtn" style="display:none">Submit</button>
                 </div>
                 <audio id="audioPlayback" controls></audio>
-                <div class="row" style="margin-top:8px">
-                    <button id="submitCorrect" disabled>I did well</button>
-                    <button id="submitIncorrect" disabled>I struggled</button>
-                </div>
+                <div class="small" style="margin-top:8px">Transcript</div>
+                <div id="transcript" class="small" style="min-height:20px; margin-top:4px"></div>
+                <div class="small" style="margin-top:8px">Feedback</div>
+                <div id="feedback" class="small" style="min-height:20px; margin-top:4px"></div>
                 <input id="sessionId" type="hidden" />
                 <input id="itemId" type="hidden" />
             </div>
@@ -257,5 +383,6 @@
     </div>
 </body>
 </html>
+
 
 

@@ -31,6 +31,11 @@
 		.prompt-body p { margin: 6px 0; }
 		.prompt-body ul, .prompt-body ol { margin: 6px 0 6px 20px; }
 		.small-btn { background: #0f172a; border: 1px solid #334155; color: #e5e7eb; padding: 6px 10px; border-radius: 8px; font-size: 12px; }
+		/* Graph visualization */
+		#promptGraph { width: 100%; height: 260px; background: #0a0f1f; border: 1px dashed #22305f; border-radius: 12px; margin-top: 12px; position: relative; overflow: hidden; }
+		.graph-node { position: absolute; padding: 8px 10px; border-radius: 10px; border: 1px solid #1e2a55; background: #121a33; color: #c7d2fe; font-size: 12px; text-align: center; }
+		.graph-node.core { background: #0b1837; }
+		.graph-link { position: absolute; background: #1e2a55; height: 2px; transform-origin: 0 0; }
 	</style>
 </head>
 <body>
@@ -87,6 +92,7 @@
 			<div style="margin-top:12px">
 				<label>Prompt</label>
 				<div id="promptNice" class="prompt-box" style="display:none"></div>
+				<div id="promptGraph" style="display:none"></div>
 				<pre id="promptOut" style="display:none"></pre>
 				<div class="small" id="targetsOut" style="display:none"></div>
 			</div>
@@ -199,6 +205,69 @@
 		if (copyBtn && navigator && navigator.clipboard) {
 			copyBtn.onclick = () => navigator.clipboard.writeText(promptText);
 		}
+
+		// Graph visualization: center core nodes and arrange target chips around
+		renderPromptGraph({ band, examTask, vocab, structures });
+	}
+
+	function renderPromptGraph({ band, examTask, vocab, structures }) {
+		const el = $('promptGraph');
+		if (!el) return;
+		el.innerHTML = '';
+		el.style.display = 'block';
+		const w = el.clientWidth || 780;
+		const h = el.clientHeight || 260;
+		// Helper to place a node
+		function node(label, x, y, cls=''){
+			const d = document.createElement('div');
+			d.className = `graph-node ${cls}`.trim();
+			d.textContent = label;
+			d.style.left = `${Math.max(8, Math.min(w-120, x))}px`;
+			d.style.top = `${Math.max(8, Math.min(h-34, y))}px`;
+			el.appendChild(d);
+			return d;
+		}
+		function link(x1,y1,x2,y2){
+			const dx = x2-x1, dy = y2-y1; const len = Math.sqrt(dx*dx+dy*dy);
+			const a = document.createElement('div');
+			a.className = 'graph-link';
+			a.style.width = `${len}px`;
+			a.style.left = `${x1}px`;
+			a.style.top = `${y1}px`;
+			a.style.transform = `rotate(${Math.atan2(dy,dx)}rad)`;
+			el.appendChild(a);
+		}
+		// Core nodes
+		const cx = w/2 - 60, cy = h/2 - 18;
+		const nPrompt = node('Prompt', cx-140, cy-30, 'core');
+		const nBand = node(`Band ${band}`, cx, cy-60, 'core');
+		const nTask = node(`Task ${examTask}`, cx, cy+10, 'core');
+		// Satellites (vocab + structures)
+		const items = [...(vocab||[]).map(v=>({label:v,type:'vocab'})), ...(structures||[]).map(s=>({label:s,type:'struct'}))];
+		const R = Math.min(w,h)/2 - 40;
+		items.slice(0,20).forEach((it, i) => {
+			const ang = (i / Math.max(1, Math.min(20, items.length))) * Math.PI * 2;
+			const x = w/2 + R * Math.cos(ang) - 60;
+			const y = h/2 + R * Math.sin(ang) - 18;
+			const n = node(it.label, x, y, it.type==='struct' ? 'struct' : '');
+			// link to task
+			const r1 = n.getBoundingClientRect();
+			const r2 = nTask.getBoundingClientRect();
+			const bx1 = r1.left - el.getBoundingClientRect().left + r1.width/2;
+			const by1 = r1.top - el.getBoundingClientRect().top + r1.height/2;
+			const bx2 = r2.left - el.getBoundingClientRect().left + r2.width/2;
+			const by2 = r2.top - el.getBoundingClientRect().top + r2.height/2;
+			link(bx1, by1, bx2, by2);
+		});
+		// Links between core nodes
+		(function linkCore(){
+			const getC = n => {
+				const r = n.getBoundingClientRect(); const base = el.getBoundingClientRect();
+				return { x: r.left - base.left + r.width/2, y: r.top - base.top + r.height/2 };
+			};
+			const a = getC(nPrompt), b = getC(nBand), c = getC(nTask);
+			link(a.x,a.y,b.x,b.y); link(a.x,a.y,c.x,c.y); link(b.x,b.y,c.x,c.y);
+		})();
 	}
 
 	function updateAuthHeader(){
@@ -245,6 +314,7 @@
 		$('genPromptBtn').disabled = true;
 		$('promptNice').style.display = 'block';
 		$('promptNice').innerHTML = '<div class="small">Generating prompt…</div>';
+		$('promptGraph').style.display = 'none';
 		$('promptOut').style.display = 'none';
 		$('targetsOut').style.display = 'none';
 		try {

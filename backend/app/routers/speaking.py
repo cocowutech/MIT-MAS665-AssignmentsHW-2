@@ -66,11 +66,12 @@ class AnswerResponse(BaseModel):
 	progress_total: int
 	finished: bool
 	feedback: Optional[str] = None
+	predicted_level: Optional[str] = None
 	item: Optional[SpeakingItem] = None
 
 
 class _SessionState:
-	def __init__(self, level_index: int, total: int = 15) -> None:
+	def __init__(self, level_index: int, total: int = 8) -> None:
 		self.session_id: str = uuid.uuid4().hex
 		self.level_index: int = level_index
 		self.correct_streak: int = 0
@@ -98,6 +99,21 @@ def _extract_json_block(text: str) -> Dict[str, Any]:
 		except Exception:
 			pass
 	raise ValueError("Failed to parse JSON from Gemini output")
+
+
+def _dedupe_transcript(text: str) -> str:
+	"""Collapse repeated 1–3 word phrases and extra whitespace in transcript."""
+	s = re.sub(r"\s+", " ", text or "").strip()
+	if not s:
+		return s
+	patterns = [
+		(r"\b(\w+\s+\w+\s+\w+)(?:\s+\1\b)+", r"\1"),
+		(r"\b(\w+\s+\w+)(?:\s+\1\b)+", r"\1"),
+		(r"\b(\w+)(?:\s+\1\b)+", r"\1"),
+	]
+	for pat, rep in patterns:
+		s = re.sub(pat, rep, s, flags=re.IGNORECASE)
+	return re.sub(r"\s+", " ", s).strip()
 
 
 def _build_prompt_for(level: str) -> str:
@@ -144,7 +160,8 @@ async def _generate_item_for(level_index: int) -> SpeakingItem:
 		raise HTTPException(status_code=502, detail="Gemini returned empty prompt")
 	# Clamp seconds to safe ranges
 	prep_seconds = max(10, min(prep_seconds, 90))
-	record_seconds = max(30, min(record_seconds, 180))
+	# Limit recording to 60s max
+	record_seconds = max(30, min(record_seconds, 60))
 	return SpeakingItem(
 		id=uuid.uuid4().hex,
 		cefr=level,
@@ -157,11 +174,11 @@ async def _generate_item_for(level_index: int) -> SpeakingItem:
 
 
 def _adjust_level(state: _SessionState, was_correct: bool) -> None:
+	# Legacy streak-based adjustment (unused now but kept for compatibility)
 	if was_correct:
 		state.correct_streak += 1
 		state.incorrect_streak = 0
 		if state.correct_streak >= 2:
-			# Increase difficulty or keep at C2, then reset streaks
 			if state.level_index < len(LEVELS) - 1:
 				state.level_index += 1
 			state.correct_streak = 0
@@ -170,11 +187,70 @@ def _adjust_level(state: _SessionState, was_correct: bool) -> None:
 		state.incorrect_streak += 1
 		state.correct_streak = 0
 		if state.incorrect_streak >= 2:
-			# Decrease difficulty or keep at A1, then reset streaks
 			if state.level_index > 0:
 				state.level_index -= 1
 			state.correct_streak = 0
 			state.incorrect_streak = 0
+
+
+async def _evaluate_transcript(level: str, prompt_text: str, transcript: str) -> Dict[str, Any]:
+	"""Ask LLM to assess CEFR A1–C2, and also give relative grade vs target level.
+	Returns dict with keys: grade (better|equal|worse), feedback, predicted_level (A1–C2 or None).
+	"""
+	client_model = "gemini-2.5-flash-lite"
+	model = settings.gemini_model_listen or client_model
+	client = GeminiClient(model=model)
+	try:
+		instructions = f"""
+You are an expert ESL examiner. Assess the student's CEFR speaking level (A1–C2).
+
+Context: The expected answer was based on a task appropriate for CEFR {level}. Use that as a reference point when comparing performance, but your primary job is to estimate the student's level.
+
+Consider task achievement, range and control of grammar and vocabulary, coherence and fluency. Ignore accent.
+
+Task prompt:
+{prompt_text}
+
+Student transcript (verbatim):
+{transcript}
+
+Return STRICT JSON only:
+{{
+  "estimated_level": "A1|A2|B1|B2|C1|C2",
+  "grade": "better|equal|worse",
+  "feedback": "one or two sentences with concrete advice"
+}}
+""".strip()
+		raw = await client.generate(instructions)
+	finally:
+		await client.aclose()
+
+	data = _extract_json_block(raw)
+	grade = str(data.get("grade", "")).strip().lower()
+	predicted = str(data.get("estimated_level", "")).strip().upper()
+	if predicted not in LEVELS:
+		predicted = None
+	if grade not in ("better", "equal", "worse"):
+		if predicted in LEVELS:
+			try:
+				grade = (
+					"better"
+					if LEVELS.index(predicted) > LEVELS.index(level)
+					else "worse" if LEVELS.index(predicted) < LEVELS.index(level) else "equal"
+				)
+			except Exception:
+				grade = "equal"
+		else:
+			grade = "equal"
+	feedback = (data.get("feedback") or "").strip() or None
+	return {"grade": grade, "feedback": feedback, "predicted_level": predicted}
+
+
+def _adjust_level_direct(state: _SessionState, grade: str) -> None:
+	if grade == "better" and state.level_index < len(LEVELS) - 1:
+		state.level_index += 1
+	elif grade == "worse" and state.level_index > 0:
+		state.level_index -= 1
 
 
 @router.post("/start", response_model=StartResponse)
@@ -183,7 +259,8 @@ async def start(req: StartRequest, user: User = Depends(get_current_user)):
 	level = (req.start_level or "A2").upper()
 	if level not in LEVELS:
 		raise HTTPException(status_code=400, detail="start_level must be one of A1,A2,B1,B2,C1,C2")
-	state = _SessionState(level_index=LEVELS.index(level), total=15)
+	# Total of 8 questions per session
+	state = _SessionState(level_index=LEVELS.index(level), total=8)
 	_sessions[state.session_id] = state
 
 	item = await _generate_item_for(state.level_index)
@@ -208,18 +285,34 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 	if not item:
 		raise HTTPException(status_code=400, detail="Unknown item_id for this session")
 
-	# For MVP, we use was_correct flag from client to drive adaptation.
-	was_correct = bool(req.was_correct)
+	transcript = (req.transcript or "").strip()
+	# Sanitize repeated phrases that may occur due to ASR interim/final overlap
+	clean_transcript = _dedupe_transcript(transcript)
+	grade = "equal"
+	feedback: Optional[str] = None
+	predicted_level: Optional[str] = None
+	if transcript:
+		try:
+			eval_result = await _evaluate_transcript(item.cefr, item.prompt, clean_transcript)
+			grade = eval_result["grade"]
+			feedback = eval_result.get("feedback")
+			predicted_level = eval_result.get("predicted_level")
+		except Exception as e:
+			feedback = f"LLM evaluation failed; keeping level the same. {str(e)[:200]}"
+	else:
+		feedback = "No transcript received; keeping level the same."
+
 	state.history.append(
 		{
 			"item_id": item.id,
-			"was_correct": was_correct,
+			"grade": grade,
 			"level": item.cefr,
-			"transcript": (req.transcript or "")[:4000],
+			"transcript": clean_transcript[:4000],
+			"feedback": feedback,
 		}
 	)
 
-	_adjust_level(state, was_correct)
+	_adjust_level_direct(state, grade)
 
 	finished = state.asked >= state.total
 	next_item: Optional[SpeakingItem] = None
@@ -229,12 +322,13 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 		state.asked += 1
 
 	response = AnswerResponse(
-		correct=was_correct,
+		correct=(grade == "better"),
 		level=LEVELS[state.level_index],
 		progress_current=state.asked,
 		progress_total=state.total,
 		finished=finished,
-		feedback=None,
+		feedback=feedback,
+		predicted_level=predicted_level,
 		item=next_item,
 	)
 
@@ -245,5 +339,3 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 			pass
 
 	return response
-
-

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from .db import Base, engine, get_db, ensure_schema
 from .cleanup import purge_older_than_one_week
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from .settings import settings
 from .routers import health, gemini
 from .routers import auth
@@ -30,6 +31,10 @@ app.include_router(speaking.router)
 # Static frontend at /app
 app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
 app.mount("/register", StaticFiles(directory="frontend/register", html=True), name="register")
+
+@app.get("/", include_in_schema=False)
+async def redirect_root_to_app():
+	return RedirectResponse(url="/app")
 
 @app.get("/info")
 def root():
