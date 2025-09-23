@@ -66,6 +66,7 @@ Visit:
   - Model: Gemini 2.5 Flash-Lite (prompt generation and scoring)
 - Vocabulary page: `http://127.0.0.1:8000/app/vocabulary/`
   - Model: Gemini 2.0 Flash-Lite
+  - Default start level: A2 (adaptive A1–C2)
 - Speaking page: `http://127.0.0.1:8000/app/speaking/`
   - Model: Gemini 2.5 Flash-Lite
 ## How it works
@@ -99,7 +100,7 @@ Visit:
   - Answer: `POST /speaking/answer` advances the session; on completion the session is cleared.
 
 - **Vocabulary (`/vocabulary`)**
-  - Start: `POST /vocabulary/start` begins at B1 by design. Each item is a short passage with a 4-option vocabulary/grammar MCQ and a brief rationale.
+  - Start: `POST /vocabulary/start` begins at A2 by default (override with `start_level` as one of A1–C2). Each item is a short passage with a 4-option vocabulary/grammar MCQ and a brief rationale.
   - Adaptation: +1 after 2 consecutive correct; −1 after 2 consecutive incorrect; total of 15 items. Rationale is returned with feedback.
 
 - **Writing (`/write`)**

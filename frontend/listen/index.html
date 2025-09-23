@@ -56,12 +56,114 @@
         let speakingClipId = null;
         let remaining = 0;
         let asked = 0;
+        let currentUtterances = [];
+        let DEFAULT_RATE = 0.92;
+        let DEFAULT_PITCH = 1.03;
+        const DEFAULT_VOLUME = 1.0;
+        let englishVoices = [];
+        const clipVoiceMap = {};
+
+        function pickBestVoice(list) {
+            if (!list || !list.length) return null;
+            const scored = list.map(v => {
+                const name = (v.name || '').toLowerCase();
+                const lang = (v.lang || '').toLowerCase();
+                let score = 0;
+                // Prefer en-US, then en-GB
+                if (lang.startsWith('en-us')) score += 8;
+                if (lang.startsWith('en-gb')) score += 7;
+                // Prefer neural/natural/online voices
+                if (name.includes('natural') || name.includes('neural') || name.includes('online')) score += 6;
+                // Vendor signals
+                if (name.includes('microsoft')) score += 5;
+                if (name.includes('google')) score += 4;
+                if (name.includes('siri')) score += 5;
+                // Mild bias to female voices for clarity
+                if (name.includes('female')) score += 1;
+                return { v: v, score };
+            });
+            scored.sort((a,b) => b.score - a.score);
+            return scored[0].v;
+        }
+
+        function populateVoices() {
+            if (!synth) return;
+            const voices = synth.getVoices();
+            englishVoices = voices.filter(v => /^en[-_]/i.test(v.lang || ''));
+        }
 
         function initTTS() {
             synth = window.speechSynthesis || null;
             if (!synth) {
                 $('ttsWarning').textContent = 'Browser TTS not available. Audio playback disabled.';
+                return;
             }
+            // Populate voices now (if available) and when the list changes
+            try { populateVoices(); } catch(_) {}
+            try { synth.onvoiceschanged = populateVoices; } catch(_) {}
+        }
+
+        function applyUtterOptions(utter, clipId) {
+            let voice = null;
+            const all = (synth && synth.getVoices && synth.getVoices()) || [];
+            const assignedName = clipVoiceMap[clipId];
+            if (assignedName) {
+                voice = (englishVoices.find(v => v.name === assignedName) || all.find(v => v.name === assignedName)) || null;
+            }
+            if (!voice) {
+                if (englishVoices && englishVoices.length) {
+                    const idx = Math.floor(Math.random() * englishVoices.length);
+                    voice = englishVoices[idx];
+                    clipVoiceMap[clipId] = voice.name;
+                } else {
+                    voice = pickBestVoice(all) || all[0] || null;
+                }
+            }
+            if (voice) {
+                utter.voice = voice;
+                if (voice.lang) utter.lang = voice.lang;
+            } else {
+                utter.lang = 'en-US';
+            }
+            utter.rate = DEFAULT_RATE;
+            utter.pitch = DEFAULT_PITCH;
+            utter.volume = DEFAULT_VOLUME;
+        }
+
+        function splitIntoChunks(text) {
+            const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+            if (!cleaned) return [];
+            // Split by sentence enders, keep them attached
+            const parts = cleaned.match(/[^.!?\n]+[.!?\u2026]+\s*|[^.!?\n]+$/g) || [cleaned];
+            const chunks = [];
+            let buffer = '';
+            const MAX_LEN = 180;
+            for (const p of parts) {
+                if ((buffer + ' ' + p).trim().length > MAX_LEN && buffer) {
+                    chunks.push(buffer.trim());
+                    buffer = p;
+                } else {
+                    buffer = (buffer ? buffer + ' ' : '') + p;
+                }
+            }
+            if (buffer.trim()) chunks.push(buffer.trim());
+            return chunks;
+        }
+
+        function speakSegments(clipId, segments, onEnd, onError) {
+            let idx = 0;
+            currentUtterances = [];
+            function speakNext() {
+                if (!synth) { if (onEnd) onEnd(); return; }
+                if (idx >= segments.length) { if (onEnd) onEnd(); return; }
+                const utter = new SpeechSynthesisUtterance(segments[idx]);
+                applyUtterOptions(utter, clipId);
+                utter.onend = () => { idx += 1; speakNext(); };
+                utter.onerror = () => { if (onError) onError(); };
+                currentUtterances.push(utter);
+                synth.speak(utter);
+            }
+            speakNext();
         }
 
         function speakClip(clipId) {
@@ -69,18 +171,19 @@
             stopSpeaking();
             const clip = clips.find(c => c.id === clipId);
             if (!clip) return;
-            const utter = new SpeechSynthesisUtterance(clip.transcript);
-            utter.rate = 0.95; // slight slow for clarity
-            utter.pitch = 1.0;
-            utter.onend = () => { speakingClipId = null; updatePlayButtons(); };
+            const segments = splitIntoChunks(clip.transcript);
             speakingClipId = clipId;
-            synth.speak(utter);
             updatePlayButtons();
+            speakSegments(clipId, segments,
+                () => { speakingClipId = null; updatePlayButtons(); },
+                () => { speakingClipId = null; updatePlayButtons(); }
+            );
         }
 
         function stopSpeaking() {
             if (!synth) return;
             synth.cancel();
+            currentUtterances = [];
             speakingClipId = null;
             updatePlayButtons();
         }

@@ -20,7 +20,7 @@ CAMBRIDGE_BY_CEFR: Dict[str, str] = {"A1": "KET", "A2": "KET", "B1": "PET", "B2"
 
 
 class StartRequest(BaseModel):
-    start_level: Optional[str] = Field(default="B1", description="Initial CEFR level A1–C2")
+    start_level: Optional[str] = Field(default="A2", description="Initial CEFR level A1–C2")
 
 
 class Answer(BaseModel):

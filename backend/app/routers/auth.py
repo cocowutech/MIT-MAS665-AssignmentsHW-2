@@ -6,6 +6,7 @@ from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
+import logging
 
 from ..settings import settings
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from ..models import AuthUser
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+logging.getLogger('passlib').setLevel(logging.ERROR)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
@@ -81,6 +83,11 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
 	except JWTError:
 		raise credentials_exception
 	return User(username=username)
+
+
+@router.get("/me", response_model=User)
+async def me(user: User = Depends(get_current_user)):
+	return user
 
 
 class RegisterRequest(BaseModel):

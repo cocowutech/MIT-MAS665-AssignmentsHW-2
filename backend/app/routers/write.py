@@ -1,5 +1,5 @@
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Any, Dict, Optional
 from ..gemini_client import GeminiClient
@@ -24,30 +24,27 @@ CEFR_BANDS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
 
 class GeneratePromptRequest(BaseModel):
-	band: Optional[str] = None
-	topic: Optional[str] = None
+    # Kept for backward compatibility; values (if any) are ignored.
+    band: Optional[str] = None
+    topic: Optional[str] = None
 
 
 class GeneratePromptResponse(BaseModel):
-	prompt: str
-	band: str
-	exam_task: str
-	targets: Dict[str, Any]
+    prompt: str
 
 
 class ScoreTextRequest(BaseModel):
-	text: str
-	band_hint: Optional[str] = None
+    text: str
 
 
 def _map_band_to_exam(band: str) -> str:
-	band = band.upper()
-	if band in ("A1", "A2"):
-		return "KET"
-	if band == "B1":
-		return "PET"
-	# For B2 and C1, map to FCE with stretch targets for C1
-	return "FCE"
+    # Deprecated: kept only to avoid accidental import errors elsewhere
+    band = (band or "B1").upper()
+    if band in ("A1", "A2"):
+        return "KET"
+    if band == "B1":
+        return "PET"
+    return "FCE"
 
 
 _CEFR_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"]
@@ -60,67 +57,54 @@ def _average_band(levels: list[str]) -> str:
 	return _CEFR_ORDER[avg]
 
 
-def _build_prompt_generation_prompt(band: str, topic: Optional[str]) -> str:
-	band = band.upper()
-	exam = _map_band_to_exam(band)
-	topic_part = f"Topic focus: {topic}." if topic else ""
-	return (
-		"You are an English assessment content writer. Generate ONE short writing prompt aligned to the given CEFR band.\n"
-		"Constraints: clear task, real-world context, word count guidance, avoid cultural bias.\n"
-		"Also map the prompt to the exam task type for KET/PET/FCE and list target vocabulary/structures appropriate for the band.\n\n"
-		f"Band: {band} (map to exam: {exam}). {topic_part}\n\n"
-		"Return ONLY a compact JSON object with keys: prompt (string), band (string), exam_task (string), targets (object with fields target_vocab [array of strings], target_structures [array of strings])."
-	)
+def _build_prompt_generation_prompt() -> str:
+    return (
+        "You are an English assessment content writer. Generate ONE writing prompt on a random, everyday topic.\n"
+        "Requirements: the prompt must ask the user to write approximately 200 words.\n"
+        "Keep it neutral and broadly relevant (no cultural bias).\n\n"
+        "Return ONLY a compact JSON object with exactly one key: prompt (string)."
+    )
 
 
-def _build_scoring_prompt(text: str, band_hint: Optional[str]) -> str:
-	band_hint = (band_hint or "B1").upper()
-	exam = _map_band_to_exam(band_hint)
-	return (
-		"You are an English writing examiner. Score the student writing using a CEFR-aligned rubric.\n"
-		"Rubric dimensions (0–5 each, half-points allowed):\n"
-		"- content (task response, relevance)\n"
-		"- organization (coherence, cohesion, paragraphing, discourse markers)\n"
-		"- language_control (grammar accuracy, spelling, punctuation)\n"
-		"- range (lexical variety, grammar range appropriate to band)\n\n"
-		f"Assumed target band: {band_hint} (exam mapping: {exam}).\n"
-		"Provide: band estimate (A2–C1), exam_mapping (exam: KET/PET/FCE, target_vocab, target_structures), per-dimension scores, overall (average), word_count, comments (global + inline array of {span, comment}).\n"
-		"If off-topic or too short (<40 words), reflect that in content score and comments.\n\n"
-		"Return ONLY a JSON object with keys: band, exam_mapping (object with exam, target_vocab [array], target_structures [array]), scores (object with content, organization, language_control, range), overall (number), word_count (integer), comments (object with global string, inline array of objects with span and comment).\n\n"
-		f"Student writing:\n{text}"
-	)
+def _build_scoring_prompt(text: str) -> str:
+    return (
+        "You are an English writing examiner. Read the student's text and estimate an overall CEFR band (A1–C2) based on holistic evidence.\n"
+        "Assess the writing considering (not limited to):\n"
+        "- vocabulary_complexity (range and appropriacy of lexis)\n"
+        "- grammar_complexity (variety of structures)\n"
+        "- verb_patterns (gerunds/infinitives after common verbs)\n"
+        "- comparatives_superlatives\n"
+        "- sequencing_words (linkers like first, then, finally, however, therefore)\n"
+        "- opinions_and_reasons (clear stance and justification)\n"
+        "- coherence_cohesion (paragraphing, flow, referencing)\n"
+        "- accuracy (grammar/spelling/punctuation)\n"
+        "- task_response (relevance, completeness)\n\n"
+        "Scoring: give each dimension a score from 0–5 (half points allowed). Compute overall as the simple average of the provided dimensions.\n"
+        "Also provide a word_count, a short global comment, and optional inline comments as an array of {span, comment}.\n\n"
+        "Return ONLY a JSON object with keys: band (A1–C2), scores (object with the dimensions above), overall (number), word_count (integer), comments (object with global string, inline array of objects with span and comment).\n\n"
+        f"Student writing:\n{text}"
+    )
 
 
 @router.post("/prompt", response_model=GeneratePromptResponse)
 async def generate_prompt(req: GeneratePromptRequest, user: User = Depends(get_current_user)):
-	band = (req.band or "B1").upper()
-	if band not in CEFR_BANDS:
-		raise HTTPException(status_code=400, detail=f"band must be one of {CEFR_BANDS}")
-	client = GeminiClient(model="gemini-2.5-flash-lite")
-	try:
-		prompt = _build_prompt_generation_prompt(band, req.topic)
-		text = await client.generate(prompt)
-		# Expecting JSON; do a light parse and fallback
-		import json
-		try:
-			data = json.loads(text)
-		except Exception:
-			# Fallback: wrap in expected structure
-			data = {
-				"prompt": text.strip(),
-				"band": band,
-				"exam_task": "task",
-				"targets": {"target_vocab": [], "target_structures": []},
-			}
-		# Validate minimally
-		return GeneratePromptResponse(
-			prompt=data.get("prompt", ""),
-			band=data.get("band", band),
-			exam_task=data.get("exam_task", "task"),
-			targets=data.get("targets", {"target_vocab": [], "target_structures": []}),
-		)
-	finally:
-		await client.aclose()
+    client = GeminiClient(model="gemini-2.5-flash-lite")
+    try:
+        prompt_text = _build_prompt_generation_prompt()
+        text = await client.generate(prompt_text)
+        # Expecting JSON; do a light parse and fallback
+        import json
+        try:
+            data = json.loads(text)
+            prompt_value = str(data.get("prompt", "")).strip()
+        except Exception:
+            # Fallback: use raw text as prompt
+            prompt_value = text.strip()
+        if not prompt_value:
+            prompt_value = "Write approximately 200 words on a random topic of everyday life (e.g., a memorable journey, a challenge you faced, or a hobby you enjoy)."
+        return GeneratePromptResponse(prompt=prompt_value)
+    finally:
+        await client.aclose()
 
 
 @router.get("/default_band")
@@ -146,7 +130,7 @@ async def score_text(req: ScoreTextRequest, user: User = Depends(get_current_use
 		text = text[:8000]
 	client = GeminiClient(model="gemini-2.5-flash-lite")
 	try:
-		prompt = _build_scoring_prompt(text, req.band_hint)
+        prompt = _build_scoring_prompt(text)
 		model_out = await client.generate(prompt)
 		import json
 		try:
@@ -161,9 +145,8 @@ async def score_text(req: ScoreTextRequest, user: User = Depends(get_current_use
 
 @router.post("/score/image")
 async def score_image(
-	file: UploadFile = File(...),
-	band_hint: Optional[str] = Form(default=None),
-	user: User = Depends(get_current_user),
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
 ):
 	if pytesseract is None or Image is None:
 		raise HTTPException(
@@ -178,6 +161,6 @@ async def score_image(
 	except Exception as e:
 		raise HTTPException(status_code=400, detail=f"Failed to OCR image: {e}")
 	# Reuse text scoring
-	return await score_text(ScoreTextRequest(text=text, band_hint=band_hint), user)
+    return await score_text(ScoreTextRequest(text=text), user)
 
 

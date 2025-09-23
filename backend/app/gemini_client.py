@@ -24,7 +24,7 @@ class GeminiClient:
 			self._auth_in_query = True
 		self._client = httpx.AsyncClient(timeout=30)
 
-	async def generate(self, prompt: str) -> str:
+	async def generate(self, prompt: str, *, thinking_budget: Optional[int] = None) -> str:
 		params: Dict[str, Any] = {}
 		headers: Dict[str, str] = {}
 		if self._auth_in_query:
@@ -32,8 +32,24 @@ class GeminiClient:
 		else:
 			headers["x-goog-api-key"] = self.api_key
 		payload: Dict[str, Any] = {"contents": [{"parts": [{"text": prompt}]}]}
-		r = await self._client.post(self.base_url, params=params, headers=headers, json=payload)
-		r.raise_for_status()
+		# Optional thinking budget to control Gemini internal reasoning latency
+		if thinking_budget is not None:
+			try:
+				budget_tokens = int(thinking_budget)
+			except Exception:
+				budget_tokens = 0
+			payload["thinkingConfig"] = {"budgetTokens": budget_tokens}
+		try:
+			r = await self._client.post(self.base_url, params=params, headers=headers, json=payload)
+			r.raise_for_status()
+		except httpx.HTTPStatusError as http_err:
+			# Fallback: some models/endpoints may not support thinkingConfig. Retry once without it.
+			if thinking_budget is not None and "thinkingConfig" in payload:
+				payload_no_thinking = {"contents": [{"parts": [{"text": prompt}]}]}
+				r = await self._client.post(self.base_url, params=params, headers=headers, json=payload_no_thinking)
+				r.raise_for_status()
+			else:
+				raise http_err
 		data = r.json()
 		try:
 			return data["candidates"][0]["content"]["parts"][0]["text"]

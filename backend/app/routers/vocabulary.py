@@ -41,7 +41,7 @@ class Question(BaseModel):
 
 
 class StartRequest(BaseModel):
-    start_level: Optional[str] = Field(default="B1", description="Initial CEFR level A1–C2")
+    start_level: Optional[str] = Field(default="A2", description="Initial CEFR level A1–C2 (default A2)")
 
 
 class StartResponse(BaseModel):
@@ -196,8 +196,10 @@ def _adjust_level(state: _SessionState, was_correct: bool) -> None:
 
 @router.post("/start", response_model=StartResponse)
 async def start(req: StartRequest, user: User = Depends(get_current_user)):
-    # Force starting level to B1 regardless of client input
-    level = "B1"
+    # Default to A2 and respect valid client-provided start_level
+    level = (req.start_level or "A2").upper()
+    if level not in LEVELS:
+        raise HTTPException(status_code=400, detail="start_level must be one of A1,A2,B1,B2,C1,C2")
     state = _SessionState(level_index=LEVELS.index(level), total=15)
     _sessions[state.session_id] = state
 

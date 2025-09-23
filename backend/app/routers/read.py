@@ -111,7 +111,7 @@ async def _llm_generate_passage(client: GeminiClient, cefr: str, cambridge: str)
         "Avoid lists or bullet points. Do not add questions or commentary.\n"
         "Output ONLY the passage text."
     )
-    text = await client.generate(prompt)
+    text = await client.generate(prompt, thinking_budget=0)
     return text.strip()
 
 
@@ -131,7 +131,7 @@ def _question_prompt(passage: str, cefr: str, cambridge: str, number: int, total
 async def _llm_generate_question(client: GeminiClient, state: SessionState) -> Dict[str, Any]:
     number = state.next_number()
     prompt = _question_prompt(state.passage, state.current_cefr, state.cambridge_level, number, state.max_questions)
-    raw = await client.generate(prompt)
+    raw = await client.generate(prompt, thinking_budget=0)
     data = _extract_json_object(raw)
     question_text = data.get("question")
     options = data.get("options")
