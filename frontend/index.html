@@ -109,6 +109,20 @@
 	let token = localStorage.getItem('token');
 	let username = localStorage.getItem('username');
 
+	async function validateToken() {
+		if (!token) return false;
+		try {
+			const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+			if (!r.ok) throw new Error('invalid');
+			const u = await r.json().catch(() => null);
+			if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
+			return true;
+		} catch (_) {
+			handleAuthFailure();
+			return false;
+		}
+	}
+
 	function updateAuthUI() {
 		if (token) {
 			$('authState').textContent = username ? `Logged in as ${username}` : 'Logged in';
@@ -184,8 +198,7 @@
 		}
 	});
 
-	updateAuthUI();
-	checkHealth();
+	(async () => { await validateToken(); updateAuthUI(); checkHealth(); })();
 	</script>
 </body>
 </html>

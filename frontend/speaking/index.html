@@ -34,6 +34,7 @@
         let submitTriggered = false;
         let asrFinalText = '';
         let session = null;
+        let nextPendingItem = null;
 
         async function login(username, password){
             const form = new URLSearchParams();
@@ -169,11 +170,33 @@
             const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
         }
 
-        async function submitAnswer(sessionId, itemId, transcript){
-            const r = await fetch('/speaking/answer', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, item_id: itemId, transcript: transcript }) });
+        function blobToBase64(blob) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]); // Get base64 part
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        async function submitAnswer(sessionId, itemId, transcript, audioBlob){
+            let audioBase64 = null;
+            if (audioBlob) {
+                audioBase64 = await blobToBase64(audioBlob);
+            }
+            const r = await fetch('/speaking/answer', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, item_id: itemId, transcript: transcript, audio_base64: audioBase64 }) });
             if(!r.ok){
                 const msg = await r.text().catch(() => 'submit failed');
                 throw new Error(msg || 'submit failed');
+            }
+            return await r.json();
+        }
+
+        async function fetchNext(sessionId){
+            const r = await fetch('/speaking/next', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId }) });
+            if(!r.ok){
+                const msg = await r.text().catch(() => 'next failed');
+                throw new Error(msg || 'next failed');
             }
             return await r.json();
         }
@@ -214,6 +237,21 @@
             }
         }
 
+        let recordedAudioBlob = null;
+
+        // ... (rest of the code)
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+                recordedAudioBlob = blob; // Store the blob
+                $('audioPlayback').src = URL.createObjectURL(blob);
+                // Reveal Submit button after recording stops
+                const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
+            };
+            mediaRecorder.start();
+
+        // ... (rest of the code)
+
         async function attemptSubmit(){
             if (submitTriggered) return;
             submitTriggered = true;
@@ -224,7 +262,7 @@
                 if (warn) warn.textContent = 'No transcript captured. Please ensure microphone and speech recognition permissions are granted and use a supported browser (Chrome).';
             }
             try{
-                const resp = await submitAnswer($('sessionId').value, $('itemId').value, cleaned);
+                const resp = await submitAnswer($('sessionId').value, $('itemId').value, cleaned, recordedAudioBlob);
                 handleAnswer(resp);
             }catch(e){
                 alert(String(e.message || e));
@@ -235,21 +273,32 @@
             const predicted = resp && resp.predicted_level ? String(resp.predicted_level).toUpperCase() : null;
             $('status').textContent = predicted ? `Level: ${resp.level} (${resp.progress_current}/${resp.progress_total}) · Estimated: ${predicted}` : `Level: ${resp.level} (${resp.progress_current}/${resp.progress_total})`;
             $('feedback').textContent = resp.feedback || '';
+            $('pronunciationScore').textContent = resp.pronunciation_score ? `Pronunciation Score: ${resp.pronunciation_score.toFixed(2)}%` : '';
+            $('pronunciationFeedback').textContent = resp.pronunciation_feedback || '';
             if(resp.finished){
                 $('prompt').textContent = 'Finished!';
                 $('guidance').textContent = '';
                 $('prep').style.display = 'none';
                 $('record').style.display = 'none';
+                const nxc = $('nextCard'); if (nxc) nxc.style.display = 'none';
                 return;
             }
-            const item = resp.item;
-            $('prompt').textContent = item.prompt;
-            $('guidance').textContent = item.guidance || '';
-            $('audioPlayback').src = '';
-            $('sessionId').value = session.session_id;
-            $('itemId').value = item.id;
-            startPrepAndRecord(item.prep_seconds, item.record_seconds);
-            const sub = $('submitBtn'); if (sub) { sub.style.display = 'none'; sub.disabled = false; }
+            // Hold the next item until user reviews feedback and clicks Continue
+            nextPendingItem = resp.item;
+            const summary = predicted ? `Estimated: ${predicted} · Next level: ${resp.level}` : `Next level: ${resp.level}`;
+            const review = $('review');
+            const reviewSummary = $('reviewSummary');
+            const reviewFeedback = $('reviewFeedback');
+            const reviewPronunciationScore = $('reviewPronunciationScore');
+            const reviewPronunciationFeedback = $('reviewPronunciationFeedback');
+            if (reviewSummary) reviewSummary.textContent = summary;
+            if (reviewFeedback) reviewFeedback.textContent = resp.feedback || '';
+            if (reviewPronunciationScore) reviewPronunciationScore.textContent = resp.pronunciation_score ? `Pronunciation Score: ${resp.pronunciation_score.toFixed(2)}%` : '';
+            if (reviewPronunciationFeedback) reviewPronunciationFeedback.textContent = resp.pronunciation_feedback || '';
+            if (review) review.style.display = 'block';
+            $('prep').style.display = 'none';
+            $('record').style.display = 'none';
+            const nxc = $('nextCard'); if (nxc) nxc.style.display = 'block';
         }
 
         async function validateToken(){
@@ -312,6 +361,8 @@
                     $('guidance').textContent = session.item.guidance || '';
                     $('audioPlayback').src = '';
                     $('feedback').textContent = '';
+                    $('pronunciationScore').textContent = '';
+                    $('pronunciationFeedback').textContent = '';
                     $('recordBtn').onclick = toggleRecording;
                     const sub = $('submitBtn'); if (sub) { sub.style.display = 'none'; sub.disabled = false; }
                     await startPrepAndRecord(session.item.prep_seconds, session.item.record_seconds);
@@ -348,6 +399,27 @@
                 submitBtn.addEventListener('click', async () => {
                     submitBtn.disabled = true;
                     try { await attemptSubmit(); } finally { submitBtn.disabled = false; }
+                });
+            }
+
+            const continueBtn = document.getElementById('continueBtn');
+            if (continueBtn) {
+                continueBtn.addEventListener('click', async () => {
+                    try{
+                        const next = await fetchNext($('sessionId').value);
+                        $('status').textContent = `Level: ${next.level} (${next.progress_current}/${next.progress_total})`;
+                        const item = next.item;
+                        $('prompt').textContent = item.prompt;
+                        $('guidance').textContent = item.guidance || '';
+                        $('audioPlayback').src = '';
+                        $('sessionId').value = next.session_id;
+                        $('itemId').value = item.id;
+                        const review = $('review'); if (review) review.style.display = 'none';
+                        startPrepAndRecord(item.prep_seconds, item.record_seconds);
+                        const sub = $('submitBtn'); if (sub) { sub.style.display = 'none'; sub.disabled = false; }
+                    }catch(e){
+                        alert(String(e.message || e));
+                    }
                 });
             }
         });
@@ -414,6 +486,21 @@
                 <div id="feedback" class="small" style="min-height:20px; margin-top:4px"></div>
                 <input id="sessionId" type="hidden" />
                 <input id="itemId" type="hidden" />
+            </div>
+
+            <div id="review" style="margin-top:12px; display:none">
+                <div class="small">Review</div>
+                <div id="reviewSummary" style="margin-top:6px"></div>
+                <div id="reviewFeedback" class="small" style="min-height:20px; margin-top:4px"></div>
+                <div class="small" style="margin-top:8px">Pronunciation Score</div>
+                <div id="reviewPronunciationScore" class="small" style="min-height:20px; margin-top:4px"></div>
+                <div class="small" style="margin-top:8px">Pronunciation Feedback</div>
+                <div id="reviewPronunciationFeedback" class="small" style="min-height:20px; margin-top:4px"></div>
+            </div>
+        </div>
+        <div class="card" id="nextCard" style="margin-top:12px; display:none">
+            <div class="row" style="justify-content:flex-end">
+                <button id="continueBtn">Next Assignment</button>
             </div>
         </div>
     </div>

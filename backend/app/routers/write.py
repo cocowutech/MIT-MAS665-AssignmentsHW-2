@@ -24,27 +24,27 @@ CEFR_BANDS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
 
 class GeneratePromptRequest(BaseModel):
-    # Kept for backward compatibility; values (if any) are ignored.
-    band: Optional[str] = None
-    topic: Optional[str] = None
+	# Kept for backward compatibility; values (if any) are ignored.
+	band: Optional[str] = None
+	topic: Optional[str] = None
 
 
 class GeneratePromptResponse(BaseModel):
-    prompt: str
+	prompt: str
 
 
 class ScoreTextRequest(BaseModel):
-    text: str
+	text: str
 
 
 def _map_band_to_exam(band: str) -> str:
-    # Deprecated: kept only to avoid accidental import errors elsewhere
-    band = (band or "B1").upper()
-    if band in ("A1", "A2"):
-        return "KET"
-    if band == "B1":
-        return "PET"
-    return "FCE"
+	# Deprecated: kept only to avoid accidental import errors elsewhere
+	band = (band or "B1").upper()
+	if band in ("A1", "A2"):
+		return "KET"
+	if band == "B1":
+		return "PET"
+	return "FCE"
 
 
 _CEFR_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"]
@@ -58,53 +58,53 @@ def _average_band(levels: list[str]) -> str:
 
 
 def _build_prompt_generation_prompt() -> str:
-    return (
-        "You are an English assessment content writer. Generate ONE writing prompt on a random, everyday topic.\n"
-        "Requirements: the prompt must ask the user to write approximately 200 words.\n"
-        "Keep it neutral and broadly relevant (no cultural bias).\n\n"
-        "Return ONLY a compact JSON object with exactly one key: prompt (string)."
-    )
+	return (
+		"You are an English assessment content writer. Generate ONE writing prompt on a random, everyday topic.\n"
+		"Requirements: the prompt must ask the user to write approximately 200 words.\n"
+		"Keep it neutral and broadly relevant (no cultural bias).\n\n"
+		"Return ONLY a compact JSON object with exactly one key: prompt (string)."
+	)
 
 
 def _build_scoring_prompt(text: str) -> str:
-    return (
-        "You are an English writing examiner. Read the student's text and estimate an overall CEFR band (A1–C2) based on holistic evidence.\n"
-        "Assess the writing considering (not limited to):\n"
-        "- vocabulary_complexity (range and appropriacy of lexis)\n"
-        "- grammar_complexity (variety of structures)\n"
-        "- verb_patterns (gerunds/infinitives after common verbs)\n"
-        "- comparatives_superlatives\n"
-        "- sequencing_words (linkers like first, then, finally, however, therefore)\n"
-        "- opinions_and_reasons (clear stance and justification)\n"
-        "- coherence_cohesion (paragraphing, flow, referencing)\n"
-        "- accuracy (grammar/spelling/punctuation)\n"
-        "- task_response (relevance, completeness)\n\n"
-        "Scoring: give each dimension a score from 0–5 (half points allowed). Compute overall as the simple average of the provided dimensions.\n"
-        "Also provide a word_count, a short global comment, and optional inline comments as an array of {span, comment}.\n\n"
-        "Return ONLY a JSON object with keys: band (A1–C2), scores (object with the dimensions above), overall (number), word_count (integer), comments (object with global string, inline array of objects with span and comment).\n\n"
-        f"Student writing:\n{text}"
-    )
+	return (
+		"You are an English writing examiner. Read the student's text and estimate an overall CEFR band (A1–C2) based on holistic evidence.\n"
+		"Assess the writing considering (not limited to):\n"
+		"- vocabulary_complexity (range and appropriacy of lexis)\n"
+		"- grammar_complexity (variety of structures)\n"
+		"- verb_patterns (gerunds/infinitives after common verbs)\n"
+		"- comparatives_superlatives\n"
+		"- sequencing_words (linkers like first, then, finally, however, therefore)\n"
+		"- opinions_and_reasons (clear stance and justification)\n"
+		"- coherence_cohesion (paragraphing, flow, referencing)\n"
+		"- accuracy (grammar/spelling/punctuation)\n"
+		"- task_response (relevance, completeness)\n\n"
+		"Scoring: give each dimension a score from 0–5 (half points allowed). Compute overall as the simple average of the provided dimensions.\n"
+		"Also provide a word_count, a short global comment, and optional inline comments as an array of {span, comment}.\n\n"
+		"Return ONLY a JSON object with keys: band (A1–C2), scores (object with the dimensions above), overall (number), word_count (integer), comments (object with global string, inline array of objects with span and comment).\n\n"
+		f"Student writing:\n{text}"
+	)
 
 
 @router.post("/prompt", response_model=GeneratePromptResponse)
 async def generate_prompt(req: GeneratePromptRequest, user: User = Depends(get_current_user)):
-    client = GeminiClient(model="gemini-2.5-flash-lite")
-    try:
-        prompt_text = _build_prompt_generation_prompt()
-        text = await client.generate(prompt_text)
-        # Expecting JSON; do a light parse and fallback
-        import json
-        try:
-            data = json.loads(text)
-            prompt_value = str(data.get("prompt", "")).strip()
-        except Exception:
-            # Fallback: use raw text as prompt
-            prompt_value = text.strip()
-        if not prompt_value:
-            prompt_value = "Write approximately 200 words on a random topic of everyday life (e.g., a memorable journey, a challenge you faced, or a hobby you enjoy)."
-        return GeneratePromptResponse(prompt=prompt_value)
-    finally:
-        await client.aclose()
+	client = GeminiClient(model="gemini-2.5-flash-lite")
+	try:
+		prompt_text = _build_prompt_generation_prompt()
+		text = await client.generate(prompt_text)
+		# Expecting JSON; do a light parse and fallback
+		import json
+		try:
+			data = json.loads(text)
+			prompt_value = str(data.get("prompt", "")).strip()
+		except Exception:
+			# Fallback: use raw text as prompt
+			prompt_value = text.strip()
+		if not prompt_value:
+			prompt_value = "Write approximately 200 words on a random topic of everyday life (e.g., a memorable journey, a challenge you faced, or a hobby you enjoy)."
+		return GeneratePromptResponse(prompt=prompt_value)
+	finally:
+		await client.aclose()
 
 
 @router.get("/default_band")
@@ -130,7 +130,7 @@ async def score_text(req: ScoreTextRequest, user: User = Depends(get_current_use
 		text = text[:8000]
 	client = GeminiClient(model="gemini-2.5-flash-lite")
 	try:
-        prompt = _build_scoring_prompt(text)
+		prompt = _build_scoring_prompt(text)
 		model_out = await client.generate(prompt)
 		import json
 		try:
@@ -161,6 +161,6 @@ async def score_image(
 	except Exception as e:
 		raise HTTPException(status_code=400, detail=f"Failed to OCR image: {e}")
 	# Reuse text scoring
-    return await score_text(ScoreTextRequest(text=text), user)
+	return await score_text(ScoreTextRequest(text=text), user)
 
 

@@ -87,8 +87,23 @@
 
   <script>
    const $ = (id) => document.getElementById(id);
-   let token = localStorage.getItem('token');
-   let username = localStorage.getItem('username');
+  let token = localStorage.getItem('token');
+  let username = localStorage.getItem('username');
+
+  async function validateToken(){
+    if (!token) return false;
+    try {
+      const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!r.ok) throw new Error('invalid');
+      const u = await r.json().catch(() => null);
+      if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
+      return true;
+    } catch(_) {
+      try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
+      token = null; username = null;
+      return false;
+    }
+  }
 
    function updateAuthHeader(){
      const st = $('authState');
@@ -120,11 +135,18 @@
      updateAuthHeader();
    }
 
-   if (token) {
-     $('login-card').style.display = 'none';
-     $('start-card').style.display = 'block';
-     updateAuthHeader();
-   }
+  (async () => {
+    const ok = await validateToken();
+    if (ok) {
+      $('login-card').style.display = 'none';
+      $('start-card').style.display = 'block';
+      updateAuthHeader();
+    } else {
+      $('login-card').style.display = 'block';
+      $('start-card').style.display = 'none';
+      updateAuthHeader();
+    }
+  })();
 
    $('loginBtn').addEventListener('click', async () => {
       $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
@@ -147,11 +169,15 @@
 
     $('startBtn').addEventListener('click', async () => {
       $('startBtn').disabled = true; $('startMsg').textContent = 'Starting…';
+      $('finish-card').style.display = 'none'; // Hide finish card on new session start
      try {
+        const lastEndCefr = localStorage.getItem('last_session_end_cefr');
+        const requestBody = lastEndCefr ? { start_level: lastEndCefr } : {};
+
         const r = await fetch('/read/session/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({})
+          body: JSON.stringify(requestBody)
         });
        if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
        if (!r.ok) throw new Error(await r.text());
@@ -212,6 +238,7 @@
         if (j.finished) {
           $('finish-card').style.display = 'block';
           $('summary').textContent = `Total ${j.summary.total}. Correct ${j.summary.correct}. Incorrect ${j.summary.incorrect}. Start ${j.summary.start_cefr} → End ${j.summary.end_cefr}.`;
+          try { localStorage.setItem('last_session_end_cefr', j.summary.end_cefr); } catch(_) {}
         } else if (j.next_question) {
           if (j.new_passage) {
             currentPassageIndex = j.passage_index;

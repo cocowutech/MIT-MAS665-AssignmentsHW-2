@@ -8,3 +8,4 @@ python-multipart==0.0.12
 Pillow==10.4.0
 pytesseract==0.3.13
 SQLAlchemy==2.0.35
+google-cloud-speech==2.25.0

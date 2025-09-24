@@ -396,10 +396,15 @@
             else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
         }
 
-        window.addEventListener('load', () => {
-            if (token) {
+        window.addEventListener('load', async () => {
+            const ok = await validateToken();
+            if (ok) {
                 $('login-card').style.display = 'none';
                 $('session-card').style.display = 'block';
+                updateAuthHeader();
+            } else {
+                $('login-card').style.display = 'block';
+                $('session-card').style.display = 'none';
                 updateAuthHeader();
             }
             initTTS();

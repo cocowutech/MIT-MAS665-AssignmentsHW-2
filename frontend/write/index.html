@@ -103,6 +103,20 @@
 	const $ = (id) => document.getElementById(id);
 	let token = localStorage.getItem('token');
 	let username = localStorage.getItem('username');
+	async function validateToken(){
+		if (!token) return false;
+		try{
+			const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+			if (!r.ok) throw new Error('invalid');
+			const u = await r.json().catch(() => null);
+			if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
+			return true;
+		}catch(_){
+			try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
+			token = null; username = null;
+			return false;
+		}
+	}
 	let lastBand = 'B1';
 
 	function escapeHTML(str) {
@@ -139,8 +153,30 @@
 		return html;
 	}
 
-		function renderPromptBox(data) {
-			const promptText = data && data.prompt ? data.prompt : 'Prompt not available';
+	function cleanPromptText(raw) {
+		let s = String(raw || '');
+		// Remove triple backtick code fences like ```json ... ```
+		s = s.replace(/```[a-zA-Z]*\s*/gi, '').replace(/```/g, '');
+		// Try to parse JSON and extract the prompt value
+		try {
+			const obj = JSON.parse(s);
+			if (obj && typeof obj === 'object' && obj.prompt) {
+				s = String(obj.prompt);
+			}
+		} catch (_) {
+			// Fallback: regex to capture "prompt": "..."
+			const m = s.match(/"prompt"\s*:\s*"([\s\S]*?)"/i);
+			if (m) {
+				s = m[1].replace(/\\"/g, '"');
+			}
+		}
+		// Remove any leftover curly braces
+		s = s.replace(/[{}]/g, '');
+		return s.trim();
+	}
+
+	function renderPromptBox(data) {
+		const promptText = cleanPromptText(data && data.prompt ? data.prompt : 'Prompt not available');
 			const words = recommendedWordRange();
 			$('promptNice').innerHTML = `
 				<div class="prompt-header">
@@ -210,12 +246,20 @@
 		else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
 	}
 
-		if (token) {
+	(async () => {
+		const ok = await validateToken();
+		if (ok) {
 			$('auth-card').style.display = 'none';
 			$('prompt-card').style.display = 'block';
 			$('write-card').style.display = 'block';
 			updateAuthHeader();
+		} else {
+			$('auth-card').style.display = 'block';
+			$('prompt-card').style.display = 'none';
+			$('write-card').style.display = 'none';
+			updateAuthHeader();
 		}
+	})();
 	$('loginBtn').addEventListener('click', async () => {
 		$('loginBtn').disabled = true; $('loginMsg').textContent = '…';
 		try {

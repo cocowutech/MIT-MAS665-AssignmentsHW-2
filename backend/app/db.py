@@ -40,4 +40,18 @@ def ensure_schema() -> None:
 				conn.exec_driver_sql("ALTER TABLE auth_users ADD COLUMN requests_used INTEGER DEFAULT 0 NOT NULL")
 			if "requests_limit" not in cols:
 				conn.exec_driver_sql("ALTER TABLE auth_users ADD COLUMN requests_limit INTEGER DEFAULT 1000 NOT NULL")
+	# Create auth_sessions table if missing
+	if "auth_sessions" not in tables:
+		Base.metadata.tables.get("auth_sessions")  # ensure model is imported
+		with engine.begin() as conn:
+			conn.exec_driver_sql(
+				"""
+				CREATE TABLE IF NOT EXISTS auth_sessions (
+					session_id VARCHAR(64) PRIMARY KEY,
+					username VARCHAR(128) NOT NULL,
+					created_at DATETIME NOT NULL,
+					last_activity_at DATETIME NOT NULL
+				)
+				"""
+			)
 

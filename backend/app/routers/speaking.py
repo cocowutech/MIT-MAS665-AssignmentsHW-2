@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 import uuid
@@ -7,6 +8,9 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+from google.cloud import speech_v1p1beta1 as speech
+from google.api_core.exceptions import GoogleAPIError
 
 from ..gemini_client import GeminiClient
 from ..settings import settings
@@ -57,6 +61,7 @@ class AnswerRequest(BaseModel):
 	was_correct: Optional[bool] = None
 	# Optional ASR transcript (future). Not required for this MVP.
 	transcript: Optional[str] = None
+	audio_base64: Optional[str] = None
 
 
 class AnswerResponse(BaseModel):
@@ -68,6 +73,8 @@ class AnswerResponse(BaseModel):
 	feedback: Optional[str] = None
 	predicted_level: Optional[str] = None
 	item: Optional[SpeakingItem] = None
+	pronunciation_score: Optional[float] = None
+	pronunciation_feedback: Optional[str] = None
 
 
 class _SessionState:
@@ -114,6 +121,101 @@ def _dedupe_transcript(text: str) -> str:
 	for pat, rep in patterns:
 		s = re.sub(pat, rep, s, flags=re.IGNORECASE)
 	return re.sub(r"\s+", " ", s).strip()
+
+
+def _heuristic_estimate_level(transcript: str) -> Dict[str, str]:
+	"""Lightweight CEFR estimator (A1–C2) when LLM is unavailable.
+	Returns dict with keys: predicted_level, feedback.
+	"""
+	text = (transcript or "").strip()
+	if not text:
+		return {"predicted_level": "A1", "feedback": "No transcript detected. Try to speak for 45–60 seconds with clear ideas."}
+	# Tokenize words
+	words = re.findall(r"[A-Za-z']+", text)
+	num_words = len(words)
+	unique_words = len(set(w.lower() for w in words)) if words else 0
+	type_token_ratio = (unique_words / num_words) if num_words else 0.0
+	long_words = [w for w in words if len(w) >= 8]
+	long_ratio = (len(long_words) / num_words) if num_words else 0.0
+	sentences = [s for s in re.split(r"[.!?]+", text) if s.strip()]
+	avg_sentence_len = (num_words / len(sentences)) if sentences else num_words
+	# Feature counts
+	subords = len(re.findall(r"\b(although|though|whereas|while|because|since|unless|until|when|after|before|if)\b", text, re.IGNORECASE))
+	relatives = len(re.findall(r"\b(who|which|that|whose|whom)\b", text, re.IGNORECASE))
+	modals = len(re.findall(r"\b(would|could|should|might|must|may|can|will|shall)\b", text, re.IGNORECASE))
+	perfect = len(re.findall(r"\b(have|has|had)\s+\w+(?:ed|en)\b", text, re.IGNORECASE))
+	linkers = len(re.findall(r"\b(however|therefore|moreover|furthermore|in addition|on the other hand|for example|for instance|in conclusion|nevertheless)\b", text, re.IGNORECASE))
+	conditionals = len(re.findall(r"\bif\b[\s\S]{0,80}?\b(would|could|might|will|can|had)\b", text, re.IGNORECASE))
+	passive = len(re.findall(r"\b(is|are|was|were|be|been|being)\s+\w+ed\b", text, re.IGNORECASE))
+	# Scoring
+	score = 0
+	# Length contribution
+	if num_words >= 120:
+		score += 6
+	elif num_words >= 80:
+		score += 5
+	elif num_words >= 50:
+		score += 4
+	elif num_words >= 30:
+		score += 3
+	elif num_words >= 15:
+		score += 2
+	else:
+		score += 1
+	# Grammar/Discourse features
+	score += min(4, subords)
+	score += min(3, relatives)
+	score += min(3, modals)
+	score += min(3, perfect)
+	score += min(3, linkers)
+	score += min(2, conditionals)
+	score += min(2, passive)
+	# Lexical richness
+	if long_ratio > 0.15:
+		score += 3
+	elif long_ratio > 0.08:
+		score += 2
+	elif long_ratio > 0.04:
+		score += 1
+	# Variety
+	if type_token_ratio > 0.6:
+		score += 2
+	elif type_token_ratio > 0.45:
+		score += 1
+	# Sentence complexity
+	if avg_sentence_len >= 20:
+		score += 2
+	elif avg_sentence_len >= 12:
+		score += 1
+	# Map score → CEFR
+	if score <= 5:
+		level = "A1"
+	elif score <= 7:
+		level = "A2"
+	elif score <= 10:
+		level = "B1"
+	elif score <= 13:
+		level = "B2"
+	elif score <= 16:
+		level = "C1"
+	else:
+		level = "C2"
+	# Feedback suggestions
+	suggestions: List[str] = []
+	if num_words < 50:
+		suggestions.append("Try to speak longer and develop your ideas with examples.")
+	if linkers < 1:
+		suggestions.append("Use linkers (e.g., however, for example) to connect ideas.")
+	if modals < 1:
+		suggestions.append("Include modal verbs to express opinions and suggestions.")
+	if perfect < 1:
+		suggestions.append("Show a wider range of tenses (e.g., present perfect).")
+	if avg_sentence_len < 12:
+		suggestions.append("Combine clauses to create more complex sentences.")
+	if long_ratio < 0.08:
+		suggestions.append("Use more topic-specific vocabulary.")
+	advice = " ".join(suggestions[:2]) or "Clear and coherent response."
+	return {"predicted_level": level, "feedback": advice}
 
 
 def _build_prompt_for(level: str) -> str:
@@ -245,12 +347,70 @@ Return STRICT JSON only:
 	feedback = (data.get("feedback") or "").strip() or None
 	return {"grade": grade, "feedback": feedback, "predicted_level": predicted}
 
-
 def _adjust_level_direct(state: _SessionState, grade: str) -> None:
 	if grade == "better" and state.level_index < len(LEVELS) - 1:
 		state.level_index += 1
 	elif grade == "worse" and state.level_index > 0:
 		state.level_index -= 1
+
+
+async def _assess_pronunciation(audio_base64: str, expected_transcript: str) -> Dict[str, Any]:
+	"""Assess pronunciation using Google Cloud Speech-to-Text API.
+	Returns dict with keys: pronunciation_score, pronunciation_feedback.
+	"""
+	if not settings.gemini_vertex_project or not settings.gemini_vertex_region:
+		return {"pronunciation_score": None, "pronunciation_feedback": "Pronunciation assessment requires Vertex AI project and region settings."}
+
+	client = speech.SpeechClient()
+
+	audio_content = base64.b64decode(audio_base64)
+
+	diarization_config = speech.SpeakerDiarizationConfig(
+		enable_speaker_diarization=False,
+		min_speaker_count=1,
+		max_speaker_count=1,
+	)
+
+	audio = speech.RecognitionAudio(content=audio_content)
+	config = speech.RecognitionConfig(
+		enable_word_info=True,
+		language_code="en-US",
+		model="default",
+		profanity_filter=True,
+		enable_automatic_punctuation=True,
+		# Use enhanced for better accuracy with pronunciation assessment
+		enhanced=True,
+		use_enhanced=True,
+		# Enable pronunciation assessment
+		enable_spoken_punctuation=True,
+		enable_spoken_emojis=True,
+		# pronunciation_assessment_config=speech.PronunciationAssessmentConfig(
+		# 	reference_text=expected_transcript,
+		# 	normalization_mode=speech.PronunciationAssessmentConfig.NormalizationMode.RESPECT_PUNCTUATION,
+		# 	scoring_mode=speech.PronunciationAssessmentConfig.ScoringMode.PHONEME_TRAINING,
+		# ),
+		# speaker_diarization_config=diarization_config,
+	)
+
+	try:
+		response = client.recognize(config=config, audio=audio)
+		# For now, we'll just get the overall confidence as a proxy for pronunciation score
+		if response.results:
+			# The Speech-to-Text API with pronunciation assessment enabled provides a score
+			# in the result.alternatives[0].pronunciation_assessment.overall_score
+			# However, the current client library version might not expose it directly in `recognize`
+			# For a full pronunciation assessment, `StreamingRecognize` or a more specific client might be needed.
+			# For now, we'll use a placeholder or a simpler metric if available.
+			# Let's use the confidence of the first alternative as a basic score.
+			score = response.results[0].alternatives[0].confidence * 100
+			feedback = "Overall pronunciation confidence based on speech recognition."
+			return {"pronunciation_score": score, "pronunciation_feedback": feedback}
+		else:
+			return {"pronunciation_score": None, "pronunciation_feedback": "No speech recognized for pronunciation assessment."}
+	except GoogleAPIError as e:
+		return {"pronunciation_score": None, "pronunciation_feedback": f"Pronunciation assessment API error: {e}"}
+	except Exception as e:
+		return {"pronunciation_score": None, "pronunciation_feedback": f"Pronunciation assessment failed: {e}"}
 
 
 @router.post("/start", response_model=StartResponse)
@@ -288,19 +448,52 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 	transcript = (req.transcript or "").strip()
 	# Sanitize repeated phrases that may occur due to ASR interim/final overlap
 	clean_transcript = _dedupe_transcript(transcript)
-	grade = "equal"
-	feedback: Optional[str] = None
 	predicted_level: Optional[str] = None
+	pronunciation_score: Optional[float] = None
+	pronunciation_feedback: Optional[str] = None
+
 	if transcript:
 		try:
 			eval_result = await _evaluate_transcript(item.cefr, item.prompt, clean_transcript)
 			grade = eval_result["grade"]
 			feedback = eval_result.get("feedback")
 			predicted_level = eval_result.get("predicted_level")
+			# If model did not provide a valid predicted level, apply heuristic fallback
+			if not predicted_level:
+				fallback = _heuristic_estimate_level(clean_transcript)
+				predicted_level = fallback.get("predicted_level")
+				# Prefer model feedback if present, else fallback advice
+				if not feedback:
+					feedback = fallback.get("feedback")
+				# Compute grade from predicted vs target level
+				try:
+					grade = (
+						"better"
+						if LEVELS.index(predicted_level) > LEVELS.index(item.cefr)
+						else "worse" if LEVELS.index(predicted_level) < LEVELS.index(item.cefr) else "equal"
+					)
+				except Exception:
+					grade = "equal"
 		except Exception as e:
-			feedback = f"LLM evaluation failed; keeping level the same. {str(e)[:200]}"
+			# Full fallback when LLM call fails entirely
+			fallback = _heuristic_estimate_level(clean_transcript)
+			predicted_level = fallback.get("predicted_level")
+			feedback = fallback.get("feedback")
+			try:
+				grade = (
+					"better"
+					if LEVELS.index(predicted_level) > LEVELS.index(item.cefr)
+					else "worse" if LEVELS.index(predicted_level) < LEVELS.index(item.cefr) else "equal"
+				)
+			except Exception:
+				grade = "equal"
 	else:
 		feedback = "No transcript received; keeping level the same."
+
+	if audio_base64:
+		pron_assessment = await _assess_pronunciation(audio_base64, clean_transcript)
+		pronunciation_score = pron_assessment.get("pronunciation_score")
+		pronunciation_feedback = pron_assessment.get("pronunciation_feedback")
 
 	state.history.append(
 		{
@@ -309,17 +502,14 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 			"level": item.cefr,
 			"transcript": clean_transcript[:4000],
 			"feedback": feedback,
+			"pronunciation_score": pronunciation_score,
+			"pronunciation_feedback": pronunciation_feedback,
 		}
 	)
 
 	_adjust_level_direct(state, grade)
 
 	finished = state.asked >= state.total
-	next_item: Optional[SpeakingItem] = None
-	if not finished:
-		next_item = await _generate_item_for(state.level_index)
-		state.items[next_item.id] = next_item
-		state.asked += 1
 
 	response = AnswerResponse(
 		correct=(grade == "better"),
@@ -329,7 +519,9 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 		finished=finished,
 		feedback=feedback,
 		predicted_level=predicted_level,
-		item=next_item,
+		item=item if not finished else None,
+		pronunciation_score=pronunciation_score,
+		pronunciation_feedback=pronunciation_feedback,
 	)
 
 	if finished:
@@ -339,3 +531,27 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 			pass
 
 	return response
+
+
+class NextRequest(BaseModel):
+	session_id: str
+
+
+@router.post("/next", response_model=StartResponse)
+async def next_item(req: NextRequest, user: User = Depends(get_current_user)):
+	state = _sessions.get(req.session_id)
+	if not state:
+		raise HTTPException(status_code=404, detail="Session not found or expired")
+	# If all items already asked (user answered the last one), there is no next
+	if state.asked >= state.total:
+		raise HTTPException(status_code=400, detail="Session finished")
+	item = await _generate_item_for(state.level_index)
+	state.items[item.id] = item
+	state.asked += 1
+	return StartResponse(
+		session_id=state.session_id,
+		item=item,
+		progress_current=state.asked,
+		progress_total=state.total,
+		level=LEVELS[state.level_index],
+	)

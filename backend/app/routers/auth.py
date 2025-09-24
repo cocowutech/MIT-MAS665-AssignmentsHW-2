@@ -11,13 +11,14 @@ import logging
 from ..settings import settings
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import AuthUser
+from ..models import AuthUser, AuthSession
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 logging.getLogger('passlib').setLevel(logging.ERROR)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+
 
 
 class Token(BaseModel):
@@ -58,7 +59,8 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
 	to_encode = data.copy()
-	expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.access_token_expire_minutes))
+	# Use long-lived tokens; inactivity is enforced server-side (24h)
+	expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=365))
 	to_encode.update({"exp": expire})
 	encoded_jwt = jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 	return encoded_jwt
@@ -69,18 +71,51 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
 	user = authenticate_user(db, form_data.username, form_data.password)
 	if not user:
 		raise HTTPException(status_code=401, detail="Incorrect username or password")
-	access_token = create_access_token({"sub": user.username})
+	# Create a new session id (jti) and persist server-side
+	import uuid
+	session_id = uuid.uuid4().hex
+	access_token = create_access_token({"sub": user.username, "jti": session_id})
+	# Upsert session row
+	try:
+		row = AuthSession(session_id=session_id, username=user.username)
+		db.merge(row)
+		db.commit()
+	except Exception:
+		db.rollback()
 	return Token(access_token=access_token)
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
 	credentials_exception = HTTPException(status_code=401, detail="Could not validate credentials")
 	try:
 		payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
 		username: str | None = payload.get("sub")
-		if username is None:
+		jti: str | None = payload.get("jti")
+		if username is None or jti is None:
 			raise credentials_exception
 	except JWTError:
+		raise credentials_exception
+	# Enforce inactivity timeout of 24 hours
+	try:
+		row = db.get(AuthSession, jti)
+		if not row or row.username != username:
+			raise credentials_exception
+		# Check last activity
+		from datetime import timezone as _tz
+		last = row.last_activity_at
+		if isinstance(last, datetime) and (datetime.now() - last).total_seconds() > 24*60*60:
+			# Session expired due to inactivity
+			db.delete(row)
+			db.commit()
+			raise HTTPException(status_code=401, detail="Session expired")
+		# Update last activity (touch)
+		row.last_activity_at = datetime.utcnow()
+		db.add(row)
+		db.commit()
+	except HTTPException:
+		raise
+	except Exception:
+		# On DB errors, fail closed
 		raise credentials_exception
 	return User(username=username)
 

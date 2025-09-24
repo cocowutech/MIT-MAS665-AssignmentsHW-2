@@ -29,6 +29,20 @@
         const $ = (id) => document.getElementById(id);
         let token = localStorage.getItem('token');
         let username = localStorage.getItem('username');
+        async function validateToken(){
+            if (!token) return false;
+            try {
+                const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!r.ok) throw new Error('invalid');
+                const u = await r.json().catch(() => null);
+                if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
+                return true;
+            } catch(_){
+                try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
+                token = null; username = null;
+                return false;
+            }
+        }
         let sessionId = null;
         let currentQuestionId = null;
         let currentAnswerIndex = null;
@@ -134,10 +148,15 @@
             else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
         }
 
-        window.addEventListener('DOMContentLoaded', () => {
-            if (token) {
+        window.addEventListener('DOMContentLoaded', async () => {
+            const ok = await validateToken();
+            if (ok) {
                 $('loginCard').style.display = 'none';
                 $('startCard').style.display = 'block';
+                updateAuthHeader();
+            } else {
+                $('loginCard').style.display = 'block';
+                $('startCard').style.display = 'none';
                 updateAuthHeader();
             }
             $('loginBtn').addEventListener('click', async () => {

@@ -60,6 +60,8 @@ class SessionState:
         self.correct_streak = 0
         self.incorrect_streak = 0
         self.questions: List[Dict[str, Any]] = []  # Each has: id, number, text, choices, correct_index, rationale, cefr
+        self.current_passage_questions: List[Dict[str, Any]] = [] # Cached questions for the current passage
+        self.current_question_index: int = 0 # Index of the current question within current_passage_questions
         self.ended = False
         self.last_outcomes: List[bool] = []  # rolling window of last N (5) outcomes across session
 
@@ -155,6 +157,48 @@ async def _llm_generate_question(client: GeminiClient, state: SessionState) -> D
     return question
 
 
+async def _llm_generate_passage_questions(client: GeminiClient, state: SessionState) -> List[Dict[str, Any]]:
+    prompt = (
+        "You are generating 5 multiple-choice reading comprehension questions for the following passage.\n"
+        f"Passage (verbatim):\n---\n{state.passage}\n---\n"
+        f"Constraints: Aim for CEFR {state.current_cefr} difficulty. Use vocabulary/structures typical of Cambridge {state.cambridge_level}.\n"
+        "Each question must be answerable using the passage only, with one unambiguously correct answer.\n"
+        "Produce EXACTLY 4 options for each question. Only ONE option is correct.\n"
+        "Return ONLY a compact JSON array of 5 question objects. Each object must have keys: question, options (array of 4 strings), correct_index (0-3), rationale.\n"
+        "No markdown, no extra commentary."
+    )
+    raw = await client.generate(prompt, thinking_budget=0)
+    data = _extract_json_object(raw)
+    if not isinstance(data, list) or len(data) != state.questions_per_passage:
+        raise HTTPException(status_code=500, detail="LLM did not return a valid array of 5 questions.")
+
+    questions = []
+    for i, q_data in enumerate(data):
+        question_text = q_data.get("question")
+        options = q_data.get("options")
+        correct_index = q_data.get("correct_index")
+        rationale = q_data.get("rationale")
+
+        if not isinstance(question_text, str) or not isinstance(options, list) or len(options) != 4 or not isinstance(correct_index, int):
+            raise HTTPException(status_code=500, detail=f"Invalid question format for question {i+1} from LLM")
+        if correct_index < 0 or correct_index > 3:
+            raise HTTPException(status_code=500, detail=f"Invalid correct_index for question {i+1} from LLM")
+
+        qid = f"q{state.next_number() + i}-{uuid.uuid4().hex[:8]}"
+        question = {
+            "id": qid,
+            "number": state.next_number() + i,
+            "question": question_text.strip(),
+            "choices": [str(o).strip() for o in options],
+            "correct_index": int(correct_index),
+            "rationale": str(rationale).strip() if isinstance(rationale, str) else "",
+            "level_cefr": state.current_cefr,
+            "cambridge_level": state.cambridge_level,
+        }
+        questions.append(question)
+    return questions
+
+
 def _step_difficulty(state: SessionState, was_correct: bool) -> None:
     if was_correct:
         state.correct_streak += 1
@@ -191,7 +235,7 @@ def _adjust_final_by_last_five(current_cefr: str, outcomes: List[bool]) -> str:
 
 @router.post("/session/start")
 async def start_session(req: StartRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    level = _validate_cefr(getattr(req, "start_level", None))
+    level = _validate_cefr(req.start_level)
     session_id = uuid.uuid4().hex
     client = GeminiClient(model="gemini-2.0-flash-lite")
     try:
@@ -215,7 +259,10 @@ async def start_session(req: StartRequest, user: User = Depends(get_current_user
         rm.end_cefr = level
         db.commit()
         _sessions[session_id] = state
-        q = await _llm_generate_question(client, state)
+        # Generate all questions for the first passage
+        all_questions = await _llm_generate_passage_questions(client, state)
+        state.current_passage_questions = all_questions
+        q = all_questions[0] # Get the first question
         state.questions.append(q)
         state.num_asked += 1
         state.questions_in_passage_asked = 1
@@ -274,6 +321,9 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
     next_question_payload: Optional[Dict[str, Any]] = None
     new_passage_text: Optional[str] = None
 
+    # Increment current_question_index for the next question
+    state.current_question_index += 1
+
     if end_of_passage:
         # Apply passage-level adjustment
         prev_level = state.current_cefr
@@ -298,6 +348,7 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
         state.passage_index += 1
         state.questions_in_passage_asked = 0
         state.correct_in_passage = 0
+        state.current_question_index = 0 # Reset question index for new passage
 
         # If we have completed all passages, finalize session and adjust by last five
         if state.passage_index > state.max_passages:
@@ -306,12 +357,14 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
             state.cambridge_level = CAMBRIDGE_BY_CEFR[state.current_cefr]
             state.ended = True
         else:
-            # Generate next passage and first question
+            # Generate next passage and all its questions
             client = GeminiClient(model="gemini-2.0-flash-lite")
             try:
                 new_passage_text = await _llm_generate_passage(client, state.current_cefr, state.cambridge_level)
                 state.passage = new_passage_text
-                q = await _llm_generate_question(client, state)
+                all_questions = await _llm_generate_passage_questions(client, state)
+                state.current_passage_questions = all_questions
+                q = all_questions[0] # Get the first question of the new passage
                 state.questions.append(q)
                 state.num_asked += 1
                 state.questions_in_passage_asked = 1
@@ -326,10 +379,9 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
             finally:
                 await client.aclose()
     else:
-        # Continue within the same passage
-        client = GeminiClient(model="gemini-2.0-flash-lite")
-        try:
-            q = await _llm_generate_question(client, state)
+        # Continue within the same passage, retrieve next question from cache
+        if state.current_question_index < len(state.current_passage_questions):
+            q = state.current_passage_questions[state.current_question_index]
             state.questions.append(q)
             state.num_asked += 1
             state.questions_in_passage_asked += 1
@@ -341,8 +393,9 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
                 "level_cefr": q["level_cefr"],
                 "cambridge_level": q["cambridge_level"],
             }
-        finally:
-            await client.aclose()
+        else:
+            # This case should ideally not be reached if logic is correct, but handle defensively
+            raise HTTPException(status_code=500, detail="No more questions in current passage cache.")
 
     # Persist progress
     rm = db.get(ReadModule, user.username)
