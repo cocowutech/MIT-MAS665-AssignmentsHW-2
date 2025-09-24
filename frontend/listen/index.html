@@ -46,6 +46,8 @@
         .bad { color: #ef4444; }
         .per-item { margin-top: 8px; }
     </style>
+    </div>
+</body>
     <script>
         const $ = (id) => document.getElementById(id);
         let token = localStorage.getItem('token');
@@ -62,6 +64,21 @@
         const DEFAULT_VOLUME = 1.0;
         let englishVoices = [];
         const clipVoiceMap = {};
+
+        async function validateToken(){
+            if (!token) return false;
+            try {
+                const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!r.ok) throw new Error('invalid');
+                const u = await r.json().catch(() => null);
+                if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
+                return true;
+            } catch(_){
+                try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
+                token = null; username = null;
+                return false;
+            }
+        }
 
         function pickBestVoice(list) {
             if (!list || !list.length) return null;
@@ -210,6 +227,8 @@
                 try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch(_) {}
                 $('loginMsg').textContent = 'Logged in';
                 $('session-card').style.display = 'block';
+                $('login-card').style.display = 'none'; // Hide login card on successful login
+                updateAuthHeader(); // Update header after successful login
             } catch (e) {
                 $('loginMsg').textContent = 'Login failed';
             } finally {
@@ -396,7 +415,7 @@
             else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
         }
 
-        window.addEventListener('load', async () => {
+        window.addEventListener('DOMContentLoaded', async () => {
             const ok = await validateToken();
             if (ok) {
                 $('login-card').style.display = 'none';
@@ -413,6 +432,7 @@
             $('submitBtn').addEventListener('click', submitAnswers);
         });
     </script>
+</html>
 </head>
 <body>
     <div class="container">

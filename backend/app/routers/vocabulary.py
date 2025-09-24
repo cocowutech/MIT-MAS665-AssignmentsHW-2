@@ -78,6 +78,8 @@ class _SessionState:
         self.total: int = total
         self.questions: Dict[str, Question] = {}
         self.history: List[Dict[str, Any]] = []
+        self._question_cache: Dict[int, List[Question]] = {}
+        self._cache_lock: asyncio.Lock = asyncio.Lock()
 
 
 _sessions: Dict[str, _SessionState] = {}
@@ -194,6 +196,28 @@ def _adjust_level(state: _SessionState, was_correct: bool) -> None:
             state.incorrect_streak = 0
 
 
+async def _preload_questions(state: _SessionState, current_level_index: int):
+    levels_to_preload = set()
+    levels_to_preload.add(current_level_index)
+    if current_level_index > 0:
+        levels_to_preload.add(current_level_index - 1)
+    if current_level_index < len(LEVELS) - 1:
+        levels_to_preload.add(current_level_index + 1)
+
+    for level_idx in levels_to_preload:
+        # Preload 2 questions for each relevant level
+        for _ in range(2):
+            try:
+                q = await _generate_question_for(level_idx)
+                async with state._cache_lock:
+                    if level_idx not in state._question_cache:
+                        state._question_cache[level_idx] = []
+                    state._question_cache[level_idx].append(q)
+            except Exception as e:
+                # Log the error but don't block the main flow
+                print(f"Error preloading question for level {LEVELS[level_idx]}: {e}")
+
+
 @router.post("/start", response_model=StartResponse)
 async def start(req: StartRequest, user: User = Depends(get_current_user)):
     # Default to A2 and respect valid client-provided start_level
@@ -203,7 +227,17 @@ async def start(req: StartRequest, user: User = Depends(get_current_user)):
     state = _SessionState(level_index=LEVELS.index(level), total=15)
     _sessions[state.session_id] = state
 
-    q = await _generate_question_for(state.level_index)
+    # Preload questions in the background
+    asyncio.create_task(_preload_questions(state, state.level_index))
+
+    # Get the first question, prioritizing from cache if available
+    q: Optional[Question] = None
+    async with state._cache_lock:
+        if state.level_index in state._question_cache and state._question_cache[state.level_index]:
+            q = state._question_cache[state.level_index].pop(0)
+    if not q:
+        q = await _generate_question_for(state.level_index)
+
     state.questions[q.id] = q
     state.asked = 1
 
@@ -241,8 +275,18 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
     finished = state.asked >= state.total
     next_question: Optional[Question] = None
     if not finished:
-        # Generate next question at current adjusted level
-        next_question = await _generate_question_for(state.level_index)
+        # Preload questions for the new level in the background
+        asyncio.create_task(_preload_questions(state, state.level_index))
+
+        # Try to get the next question from cache
+        async with state._cache_lock:
+            if state.level_index in state._question_cache and state._question_cache[state.level_index]:
+                next_question = state._question_cache[state.level_index].pop(0)
+        
+        # If not in cache, generate it
+        if not next_question:
+            next_question = await _generate_question_for(state.level_index)
+
         state.questions[next_question.id] = next_question
         state.asked += 1
 

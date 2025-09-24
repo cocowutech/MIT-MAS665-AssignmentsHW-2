@@ -77,7 +77,7 @@
         }
 
         function renderQuestion(payload) {
-            $('meta').textContent = `Level: ${payload.level} • ${payload.progress_current}/${payload.progress_total}`;
+            $('sessionMeta').textContent = `Level: ${payload.level} • ${payload.progress_current}/${payload.progress_total}`;
             const q = payload.question;
             currentQuestionId = q.id;
             currentAnswerIndex = q.answer_index;
@@ -117,7 +117,7 @@
                 });
                 const j = await r.json();
                 if (!r.ok) throw new Error(j.detail || 'answer failed');
-                $('meta').textContent = `Level: ${j.level} • ${j.progress_current}/${j.progress_total}`;
+                $('sessionMeta').textContent = `Level: ${j.level} • ${j.progress_current}/${j.progress_total}`;
                 $('feedback').textContent = (j.correct ? 'Correct. ' : 'Incorrect. ') + (j.explanation || '');
                 const opts = document.querySelectorAll('.option');
                 opts.forEach((el, i) => {
@@ -177,7 +177,7 @@
             $('startBtn').addEventListener('click', async () => {
                 $('startBtn').disabled = true; $('startMsg').textContent = '…';
                 try {
-                    await startSession($('startLevel').value);
+                    await startSession('A2');
                     $('sessionCard').style.display = 'block';
                 } catch (e) {
                     $('startMsg').textContent = e && e.message ? e.message : 'Start failed';
@@ -222,17 +222,7 @@
         <div class="card" id="startCard" style="display:none">
             <h3>Start Session</h3>
             <div class="row">
-                <div>
-                    <label>Start Level (A1–C2)</label>
-                    <select id="startLevel">
-                        <option>A1</option>
-                        <option selected>A2</option>
-                        <option>B1</option>
-                        <option>B2</option>
-                        <option>C1</option>
-                        <option>C2</option>
-                    </select>
-                </div>
+                <div class="small">Starting at CEFR A2. Difficulty adapts based on your answers.</div>
             </div>
             <div style="margin-top:12px">
                 <button id="startBtn">Start</button>
@@ -241,7 +231,7 @@
         </div>
 
         <div class="card" id="sessionCard" style="display:none">
-            <h3>Question</h3>
+            <h3>Question <span id="sessionMeta" class="small" style="margin-left:8px"></span></h3>
             <div class="small">Passage</div>
             <div id="passage" class="passage"></div>
             <div style="height:8px"></div>

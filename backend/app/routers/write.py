@@ -1,4 +1,7 @@
 from __future__ import annotations
+import json
+import re
+import os
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Any, Dict, Optional
@@ -11,6 +14,10 @@ from ..models import ReadModule
 try:
 	import pytesseract  # type: ignore
 	from PIL import Image  # type: ignore
+	# Configure Tesseract command if environment variable is set
+	tesseract_cmd = os.environ.get("TESSERACT_CMD")
+	if tesseract_cmd:
+		pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
 except Exception:
 	# Defer import errors until the OCR endpoint is actually called
 	pytesseract = None  # type: ignore
@@ -36,7 +43,6 @@ class GeneratePromptResponse(BaseModel):
 class ScoreTextRequest(BaseModel):
 	text: str
 
-
 def _map_band_to_exam(band: str) -> str:
 	# Deprecated: kept only to avoid accidental import errors elsewhere
 	band = (band or "B1").upper()
@@ -48,7 +54,6 @@ def _map_band_to_exam(band: str) -> str:
 
 
 _CEFR_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"]
-
 def _average_band(levels: list[str]) -> str:
 	if not levels:
 		return "B1"
@@ -56,15 +61,13 @@ def _average_band(levels: list[str]) -> str:
 	avg = round(sum(idxs) / len(idxs))
 	return _CEFR_ORDER[avg]
 
-
 def _build_prompt_generation_prompt() -> str:
 	return (
 		"You are an English assessment content writer. Generate ONE writing prompt on a random, everyday topic.\n"
-		"Requirements: the prompt must ask the user to write approximately 200 words.\n"
+		"Requirements: the prompt must ask the user to write approximately 350 words.\n"
 		"Keep it neutral and broadly relevant (no cultural bias).\n\n"
 		"Return ONLY a compact JSON object with exactly one key: prompt (string)."
 	)
-
 
 def _build_scoring_prompt(text: str) -> str:
 	return (
@@ -85,6 +88,28 @@ def _build_scoring_prompt(text: str) -> str:
 		f"Student writing:\n{text}"
 	)
 
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    code_block = re.search(r"```json\s*([\s\S]*?)\s*```", text)
+    if code_block:
+        candidate = code_block.group(1)
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+    first = text.find("{")
+    last = text.rfind("}")
+    if first != -1 and last != -1 and last > first:
+        candidate = text[first : last + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+    raise HTTPException(status_code=500, detail="LLM did not return valid JSON.")
+
 
 @router.post("/prompt", response_model=GeneratePromptResponse)
 async def generate_prompt(req: GeneratePromptRequest, user: User = Depends(get_current_user)):
@@ -101,7 +126,7 @@ async def generate_prompt(req: GeneratePromptRequest, user: User = Depends(get_c
 			# Fallback: use raw text as prompt
 			prompt_value = text.strip()
 		if not prompt_value:
-			prompt_value = "Write approximately 200 words on a random topic of everyday life (e.g., a memorable journey, a challenge you faced, or a hobby you enjoy)."
+			prompt_value = "Write approximately 350 words on a random topic of everyday life (e.g., a memorable journey, a challenge you faced, or a hobby you enjoy)."
 		return GeneratePromptResponse(prompt=prompt_value)
 	finally:
 		await client.aclose()
@@ -132,12 +157,7 @@ async def score_text(req: ScoreTextRequest, user: User = Depends(get_current_use
 	try:
 		prompt = _build_scoring_prompt(text)
 		model_out = await client.generate(prompt)
-		import json
-		try:
-			data = json.loads(model_out)
-		except Exception:
-			# Return raw text if JSON parsing fails
-			return {"raw": model_out}
+		data = _extract_json_object(model_out)
 		return data
 	finally:
 		await client.aclose()
@@ -148,19 +168,24 @@ async def score_image(
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
 ):
-	if pytesseract is None or Image is None:
-		raise HTTPException(
-			status_code=500,
-			detail="OCR dependencies not installed. Install system package 'tesseract-ocr' and Python packages 'pytesseract' and 'Pillow'",
-		)
-	try:
-		content = await file.read()
-		from io import BytesIO
-		img = Image.open(BytesIO(content))
-		text = pytesseract.image_to_string(img)
-	except Exception as e:
-		raise HTTPException(status_code=400, detail=f"Failed to OCR image: {e}")
-	# Reuse text scoring
-	return await score_text(ScoreTextRequest(text=text), user)
-
-
+    if pytesseract is None or Image is None:
+        raise HTTPException(
+            status_code=500,
+            detail="OCR dependencies not installed. Install system package 'tesseract-ocr' and Python packages 'pytesseract' and 'Pillow'",
+        )
+    try:
+        content = await file.read()
+        from io import BytesIO
+        img = Image.open(BytesIO(content))
+        text = pytesseract.image_to_string(img)
+        if not text.strip():
+            raise ValueError("No text recognized in the image. This could be due to a poor quality image or Tesseract not being able to process it.")
+    except pytesseract.TesseractNotFoundError:
+        raise HTTPException(
+            status_code=400,
+            detail="Tesseract OCR engine not found. Please ensure it is installed and accessible in your system's PATH, or set the TESSERACT_CMD environment variable.",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to OCR image: {e}. Ensure the uploaded file is a valid image and Tesseract is correctly configured.")
+    # Reuse text scoring
+    return await score_text(ScoreTextRequest(text=text), user)

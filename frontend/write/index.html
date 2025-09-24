@@ -31,11 +31,15 @@
 		.prompt-body p { margin: 6px 0; }
 		.prompt-body ul, .prompt-body ol { margin: 6px 0 6px 20px; }
 		.small-btn { background: #0f172a; border: 1px solid #334155; color: #e5e7eb; padding: 6px 10px; border-radius: 8px; font-size: 12px; }
-		/* Graph visualization */
-		#promptGraph { width: 100%; height: 260px; background: #0a0f1f; border: 1px dashed #22305f; border-radius: 12px; margin-top: 12px; position: relative; overflow: hidden; }
-		.graph-node { position: absolute; padding: 8px 10px; border-radius: 10px; border: 1px solid #1e2a55; background: #121a33; color: #c7d2fe; font-size: 12px; text-align: center; }
-		.graph-node.core { background: #0b1837; }
-		.graph-link { position: absolute; background: #1e2a55; height: 2px; transform-origin: 0 0; }
+
+		/* Scoring result enhancements */
+		.score-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid #1e2a55; }
+		.score-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 8px; }
+		.score-item { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; }
+		.score-label { font-size: 12px; color: #93c5fd; margin-bottom: 4px; }
+		.score-value { font-size: 16px; font-weight: 600; color: #e5e7eb; }
+		.comment-box { background: #0a0f1f; border: 1px solid #22305f; border-radius: 8px; padding: 12px; margin-top: 8px; }
+		.inline-annot { background: #062b2b; border-left: 3px solid #0ea5e9; padding: 6px 8px; margin: 6px 0; }
 	</style>
 </head>
 <body>
@@ -75,7 +79,6 @@
 			<div style="margin-top:12px">
 				<label>Prompt</label>
 				<div id="promptNice" class="prompt-box" style="display:none"></div>
-				<div id="promptGraph" style="display:none"></div>
 				<pre id="promptOut" style="display:none"></pre>
 			</div>
 		</div>
@@ -123,7 +126,7 @@
 		return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s]));
 	}
 
-		function recommendedWordRange() { return 'around 200 words'; }
+		function recommendedWordRange() { return 'around 350 words'; }
 
 	function formatPromptHTML(text) {
 		const lines = String(text || '').split(/\r?\n/);
@@ -191,7 +194,7 @@
 				<div class="prompt-body">${formatPromptHTML(promptText)}</div>
 				<div class="section-title">Instructions</div>
 				<ul class="small">
-					<li>Write about 200 words.</li>
+					<li>Write about 350 words.</li>
 					<li>Organize into clear paragraphs and use linking words.</li>
 					<li>Use varied vocabulary and structures where possible.</li>
 					<li>Check grammar, spelling, and punctuation before submitting.</li>
@@ -202,42 +205,7 @@
 			if (copyBtn && navigator && navigator.clipboard) {
 				copyBtn.onclick = () => navigator.clipboard.writeText(promptText);
 			}
-
-			// Minimal graph: show only core nodes
-			renderPromptGraph();
 		}
-
-		function renderPromptGraph() {
-		const el = $('promptGraph');
-		if (!el) return;
-		el.innerHTML = '';
-		el.style.display = 'block';
-		const w = el.clientWidth || 780;
-		const h = el.clientHeight || 260;
-		// Helper to place a node
-		function node(label, x, y, cls=''){
-			const d = document.createElement('div');
-			d.className = `graph-node ${cls}`.trim();
-			d.textContent = label;
-			d.style.left = `${Math.max(8, Math.min(w-120, x))}px`;
-			d.style.top = `${Math.max(8, Math.min(h-34, y))}px`;
-			el.appendChild(d);
-			return d;
-		}
-		function link(x1,y1,x2,y2){
-			const dx = x2-x1, dy = y2-y1; const len = Math.sqrt(dx*dx+dy*dy);
-			const a = document.createElement('div');
-			a.className = 'graph-link';
-			a.style.width = `${len}px`;
-			a.style.left = `${x1}px`;
-			a.style.top = `${y1}px`;
-			a.style.transform = `rotate(${Math.atan2(dy,dx)}rad)`;
-			el.appendChild(a);
-		}
-			// Core nodes only
-			const cx = w/2 - 60, cy = h/2 - 18;
-			node('Prompt', cx, cy-20, 'core');
-	}
 
 	function updateAuthHeader(){
 		const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
@@ -286,7 +254,6 @@
 		$('genPromptBtn').disabled = true;
 		$('promptNice').style.display = 'block';
 		$('promptNice').innerHTML = '<div class="small">Generating prompt…</div>';
-		$('promptGraph').style.display = 'none';
 		$('promptOut').style.display = 'none';
 		try {
 				const r = await fetch('/write/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({}) });
@@ -300,16 +267,34 @@
 	});
 
 		$('scoreTextBtn').addEventListener('click', async () => {
-		$('scoreTextBtn').disabled = true; $('result-card').style.display = 'block'; $('resultOut').textContent = '…'; $('inlineOut').innerHTML = '';
+		$('scoreTextBtn').disabled = true; $('result-card').style.display = 'block'; $('resultOut').innerHTML = '…'; $('inlineOut').innerHTML = '';
 		try {
 				const r = await fetch('/write/score/text', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ text: $('essay').value }) });
-			const t = await r.text();
-			let j = null;
-			try { j = JSON.parse(t); } catch { j = { raw: t }; }
+				if (!r.ok) {
+					const errorData = await r.json();
+					throw new Error(errorData.detail || `Server error: ${r.status}`);
+				}
+			const j = await r.json();
 				if (j.band) $('bandOut').textContent = `Band estimate: ${j.band}`; else $('bandOut').textContent = '';
-			$('resultOut').textContent = JSON.stringify(j, null, 2);
-			if (j.comments && Array.isArray(j.comments.inline)) {
-				$('inlineOut').innerHTML = j.comments.inline.map(a => `<div class="inline-annot"><strong>${a.span||''}</strong><div class="small">${a.comment||''}</div></div>`).join('');
+
+				let resultHtml = '';
+				if (j.overall !== undefined) {
+					resultHtml += `<div class="score-section"><div class="section-title">Overall Score</div><div class="score-item"><div class="score-value">${j.overall.toFixed(1)}</div></div></div>`;
+				}
+				if (j.scores) {
+					resultHtml += `<div class="score-section"><div class="section-title">Detailed Scores</div><div class="score-grid">`;
+					for (const key in j.scores) {
+						resultHtml += `<div class="score-item"><div class="score-label">${escapeHTML(key.replace(/_/g, ' '))}</div><div class="score-value">${j.scores[key].toFixed(1)}</div></div>`;
+					}
+					resultHtml += `</div></div>`;
+				}
+				if (j.comments && j.comments.global) {
+					resultHtml += `<div class="score-section"><div class="section-title">Global Comments</div><div class="comment-box">${escapeHTML(j.comments.global)}</div></div>`;
+				}
+				$('resultOut').innerHTML = resultHtml;
+
+				if (j.comments && Array.isArray(j.comments.inline)) {
+				$('inlineOut').innerHTML = j.comments.inline.map(a => `<div class="inline-annot"><strong>${escapeHTML(a.span||'')}</strong><div class="small">${escapeHTML(a.comment||'')}</div></div>`).join('');
 			}
 		} catch (e) {
 			$('resultOut').textContent = String(e);
@@ -321,21 +306,46 @@
 		$('scoreImageBtn').addEventListener('click', async () => {
 		const f = $('imageFile').files[0];
 		if (!f) { alert('Choose an image first'); return; }
-		$('scoreImageBtn').disabled = true; $('result-card').style.display = 'block'; $('resultOut').textContent = '…'; $('inlineOut').innerHTML = '';
+		$('scoreImageBtn').disabled = true; $('result-card').style.display = 'block'; $('resultOut').innerHTML = '…'; $('inlineOut').innerHTML = '';
 		try {
 			const form = new FormData();
 			form.append('file', f);
 				const r = await fetch('/write/score/image', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form });
-			const t = await r.text();
-			let j = null;
-			try { j = JSON.parse(t); } catch { j = { raw: t }; }
+				if (!r.ok) {
+					const errorData = await r.json();
+					throw new Error(errorData.detail || `Server error: ${r.status}`);
+				}
+			const j = await r.json();
 				if (j.band) $('bandOut').textContent = `Band estimate: ${j.band}`; else $('bandOut').textContent = '';
-			$('resultOut').textContent = JSON.stringify(j, null, 2);
-			if (j.comments && Array.isArray(j.comments.inline)) {
-				$('inlineOut').innerHTML = j.comments.inline.map(a => `<div class="inline-annot"><strong>${a.span||''}</strong><div class="small">${a.comment||''}</div></div>`).join('');
+
+				let resultHtml = '';
+				if (j.overall !== undefined) {
+					resultHtml += `<div class="score-section"><div class="section-title">Overall Score</div><div class="score-item"><div class="score-value">${j.overall.toFixed(1)}</div></div></div>`;
+				}
+				if (j.scores) {
+					resultHtml += `<div class="score-section"><div class="section-title">Detailed Scores</div><div class="score-grid">`;
+					for (const key in j.scores) {
+						resultHtml += `<div class="score-item"><div class="score-label">${escapeHTML(key.replace(/_/g, ' '))}</div><div class="score-value">${j.scores[key].toFixed(1)}</div></div>`;
+					}
+					resultHtml += `</div></div>`;
+				}
+				if (j.comments && j.comments.global) {
+					resultHtml += `<div class="score-section"><div class="section-title">Global Comments</div><div class="comment-box">${escapeHTML(j.comments.global)}</div></div>`;
+				}
+				$('resultOut').innerHTML = resultHtml;
+
+				if (j.comments && Array.isArray(j.comments.inline)) {
+				$('inlineOut').innerHTML = j.comments.inline.map(a => `<div class="inline-annot"><strong>${escapeHTML(a.span||'')}</strong><div class="small">${escapeHTML(a.comment||'')}</div></div>`).join('');
 			}
 		} catch (e) {
-			$('resultOut').textContent = String(e);
+			let errorMsg = String(e);
+			try {
+				const errorJson = JSON.parse(e.message.substring(e.message.indexOf('{')));
+				if (errorJson && errorJson.detail) {
+					errorMsg = errorJson.detail;
+				}
+			} catch (_) { /* ignore */ }
+			$('resultOut').textContent = `Error: ${errorMsg}`;
 		} finally {
 			$('scoreImageBtn').disabled = false;
 		}
