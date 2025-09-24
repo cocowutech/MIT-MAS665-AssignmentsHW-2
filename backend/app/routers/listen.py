@@ -231,6 +231,7 @@ async def submit_answers(req: SubmitRequest, user: User = Depends(get_current_us
 
     # Validate against currently active batch
     id_to_clip: Dict[str, Dict[str, Any]] = {c["id"]: c for c in state.clips}
+    evaluated_batch: List[Dict[str, Any]] = []
     for ans in req.answers:
         clip = id_to_clip.get(ans.clip_id)
         if not clip:
@@ -254,6 +255,15 @@ async def submit_answers(req: SubmitRequest, user: User = Depends(get_current_us
         # After each pair, adjust difficulty
         if state.asked % 2 == 0:
             _adjust_after_pair(state, state.history[-2:])
+        evaluated_batch.append(
+            {
+                "clip_id": clip["id"],
+                "chosen_index": ans.choice_index,
+                "correct_choice_index": clip["correct_index"],
+                "correct": is_correct,
+                "rationale": clip.get("rationale", ""),
+            }
+        )
 
     # If session not finished, generate next batch at current level
     if state.asked < state.total:
@@ -290,6 +300,7 @@ async def submit_answers(req: SubmitRequest, user: User = Depends(get_current_us
             "asked": state.asked,
             "remaining": remaining,
             "finished": False,
+            "evaluated": evaluated_batch,
         }
 
     # Session finished — compute final summary across all answers
@@ -323,6 +334,7 @@ async def submit_answers(req: SubmitRequest, user: User = Depends(get_current_us
         },
         "per_item": state.answer_log,
         "finished": True,
+        "evaluated": evaluated_batch,
     }
 
 
@@ -350,5 +362,4 @@ async def get_state(session_id: str, user: User = Depends(get_current_user)):
         ],
         "finished": state.ended,
     }
-
 

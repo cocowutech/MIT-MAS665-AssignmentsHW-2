@@ -283,6 +283,8 @@ async def start_session(req: StartRequest, user: User = Depends(get_current_user
                 "choices": q["choices"],
                 "level_cefr": q["level_cefr"],
                 "cambridge_level": q["cambridge_level"],
+                "correct_choice_index": q["correct_index"],
+                "rationale": q.get("rationale", ""),
             },
             "total_questions": state.max_questions,
         }
@@ -377,6 +379,8 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
                     "choices": q["choices"],
                     "level_cefr": q["level_cefr"],
                     "cambridge_level": q["cambridge_level"],
+                    "correct_choice_index": q["correct_index"],
+                    "rationale": q.get("rationale", ""),
                 }
             finally:
                 await client.aclose()
@@ -394,6 +398,8 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
                 "choices": q["choices"],
                 "level_cefr": q["level_cefr"],
                 "cambridge_level": q["cambridge_level"],
+                "correct_choice_index": q["correct_index"],
+                "rationale": q.get("rationale", ""),
             }
         else:
             # This case should ideally not be reached if logic is correct, but handle defensively
@@ -501,5 +507,3 @@ async def get_summary(session_id: str, user: User = Depends(get_current_user)):
         "end_cefr": end_cefr,
         "cambridge_level": CAMBRIDGE_BY_CEFR[end_cefr],
     }
-
-

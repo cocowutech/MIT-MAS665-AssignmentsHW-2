@@ -57,10 +57,31 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
 	return None
 
 
+def _resolve_expiry(expires_delta: Optional[timedelta]) -> datetime:
+	"""Return a safe JWT expiry timestamp.
+
+	The previous implementation attempted a ~10k year lifetime, which overflowed
+	`datetime` for some platforms. We now respect the configured session timeout
+	when provided, and fall back to a generous but finite default.
+	"""
+	delta = expires_delta
+	if delta is None:
+		minutes = getattr(settings, "access_token_expire_minutes", None)
+		if isinstance(minutes, int) and minutes > 0:
+			delta = timedelta(minutes=minutes)
+		else:
+			delta = timedelta(days=30)
+	now = datetime.now(timezone.utc)
+	try:
+		return now + delta
+	except OverflowError:
+		# Cap at far future but within datetime bounds
+		return datetime.max.replace(tzinfo=timezone.utc)
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
 	to_encode = data.copy()
-	# Use long-lived tokens; inactivity is enforced server-side (24h)
-	expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=365*10000))
+	expire = _resolve_expiry(expires_delta)
 	to_encode.update({"exp": expire})
 	encoded_jwt = jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 	return encoded_jwt
@@ -149,5 +170,3 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
 	db.add(row)
 	db.commit()
 	return {"ok": True}
-
-

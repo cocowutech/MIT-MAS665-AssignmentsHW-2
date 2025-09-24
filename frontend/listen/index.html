@@ -29,6 +29,9 @@
         .choice-card { background: #0a0f1f; border: 1px solid #1e2a55; padding: 10px; border-radius: 8px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease; }
         .choice-card:hover { border-color: #3756b3; }
         .choice-card.selected { border-color: #60a5fa; background: #0b162d; }
+        .choice-card.correct { border-color: #10b981; background: #0f1f16; }
+        .choice-card.incorrect { border-color: #ef4444; background: #1f1010; }
+        .choice-card.locked { pointer-events: none; opacity: 0.85; }
         .choice-key { width: 24px; height: 24px; border-radius: 999px; background: #1e2a55; color: #c7d2fe; display: flex; align-items: center; justify-content: center; font-weight: 600; flex: 0 0 24px; }
         .choice-text { color: #e5e7eb; }
         .pill { display: inline-block; background: #1e2a55; color: #c7d2fe; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-left: 6px; }
@@ -45,6 +48,9 @@
         .ok { color: #22c55e; }
         .bad { color: #ef4444; }
         .per-item { margin-top: 8px; }
+        .choice-feedback { margin-top: 6px; font-size: 13px; color: #9ca3af; }
+        .choice-feedback.ok { color: #22c55e; }
+        .choice-feedback.bad { color: #f87171; }
     </style>
     </div>
 </body>
@@ -64,6 +70,7 @@
         const DEFAULT_VOLUME = 1.0;
         let englishVoices = [];
         const clipVoiceMap = {};
+        let nextClips = null;
 
         async function validateToken(){
             if (!token) return false;
@@ -269,6 +276,7 @@
                                 </div>
                             `).join('')}
                         </div>
+                        <div id="feedback-${clip.id}" class="choice-feedback"></div>
                     </div>
                 `;
                 root.appendChild(card);
@@ -311,6 +319,33 @@
             highlightSelection(clipId, index);
         }
 
+        function reflectEvaluation(results) {
+            if (!Array.isArray(results)) return;
+            results.forEach(item => {
+                if (!item || !item.clip_id) return;
+                const container = $('choices-' + item.clip_id);
+                if (!container) return;
+                const cards = container.querySelectorAll('.choice-card');
+                cards.forEach((card, idx) => {
+                    card.classList.remove('selected', 'correct', 'incorrect', 'locked');
+                    if (idx === item.correct_choice_index) {
+                        card.classList.add('correct');
+                    }
+                    if (idx === item.chosen_index && idx !== item.correct_choice_index) {
+                        card.classList.add('incorrect');
+                    }
+                    card.classList.add('locked');
+                });
+                const feedbackEl = $('feedback-' + item.clip_id);
+                if (feedbackEl) {
+                    const rationale = (item.rationale || '').trim();
+                    const label = item.correct ? 'Correct.' : 'Incorrect.';
+                    feedbackEl.textContent = rationale ? `${label} ${rationale}` : label;
+                    feedbackEl.className = `choice-feedback ${item.correct ? 'ok' : 'bad'}`;
+                }
+            });
+        }
+
         async function startSession() {
             $('startBtn').disabled = true; $('startMsg').textContent = '…';
             try {
@@ -350,24 +385,23 @@
                     return;
                 }
                 const j = await r.json();
+                reflectEvaluation(j.evaluated);
                 if (j.finished) {
-                    renderResult(j);
                     $('submitMsg').textContent = '';
-                    $('clipsRoot').innerHTML = '';
                     $('submitBtn').style.display = 'none';
                     $('nextClipsBtn').style.display = 'none';
-                    // finishSessionBtnContainer is shown by renderResult
+                    nextClips = null;
+                    renderResult(j);
                 } else {
-                    clips = j.clips || [];
-                    clips.forEach(c => { c._selected = undefined; });
                     asked = parseInt(j.asked || 0);
                     remaining = parseInt(j.remaining || (10 - asked));
                     $('startMsg').textContent = `Level: ${j.target_cefr} (${j.cambridge_level}) • Questions: ${asked}/${asked + remaining}`;
-                    $('submitMsg').textContent = 'Next set loaded. Continue.';
-                    $('nextClipsBtn').style.display = 'block';
+                    $('submitMsg').textContent = 'Answers graded. Review feedback, then click Next.';
+                    nextClips = Array.isArray(j.clips) ? j.clips.map(c => ({ ...c })) : [];
+                    nextClips.forEach(c => { c._selected = undefined; });
+                    $('nextClipsBtn').style.display = nextClips.length ? 'block' : 'none';
                     $('submitBtn').style.display = 'none';
-                    $('finishSessionBtnContainer').style.display = 'none'; // Ensure hidden when not finished
-                    // renderClips() will be called by the 'Next' button
+                    $('finishSessionBtnContainer').style.display = 'none';
                 }
             } catch (e) {
                 $('result').innerHTML = `<div class="result-card">${String(e).replace(/</g,'&lt;')}</div>`;
@@ -376,10 +410,30 @@
             }
         }
 
+        function loadNextClips() {
+            if (!Array.isArray(nextClips) || !nextClips.length) {
+                $('nextClipsBtn').style.display = 'none';
+                $('submitBtn').style.display = 'block';
+                return;
+            }
+            stopSpeaking();
+            clips = nextClips.map(c => ({ ...c }));
+            nextClips = null;
+            clips.forEach(c => { c._selected = undefined; });
+            $('result').innerHTML = '';
+            $('resultSection').style.display = 'none';
+            $('submitMsg').textContent = '';
+            $('submitBtn').style.display = 'block';
+            $('submitBtn').disabled = false;
+            $('nextClipsBtn').style.display = 'none';
+            renderClips();
+        }
+
         function renderResult(res) {
             $('submitBtn').style.display = 'none';
             $('nextClipsBtn').style.display = 'none';
             $('finishSessionBtnContainer').style.display = 'block';
+            $('resultSection').style.display = 'block';
             const correct = parseInt(res.correct) || 0;
             const incorrect = parseInt(res.incorrect) || 0;
             const total = parseInt(res.total) || (correct + incorrect);
@@ -501,9 +555,9 @@
             <div style="margin-top:12px">
                 <button id="submitBtn">Submit Answers</button>
                 <span id="submitMsg" class="small" style="margin-left:8px"></span>
-                <button id="nextClipsBtn" style="display:none; margin-left: 8px;" onclick="renderClips()">Next</button>
+                <button id="nextClipsBtn" style="display:none; margin-left: 8px;" onclick="loadNextClips()">Next</button>
             </div>
-            <div style="margin-top:12px">
+            <div id="resultSection" style="display:none; margin-top:12px">
                 <h3 class="section-title">Result</h3>
                 <div id="result"></div>
                 <div style="margin-top: 16px;" id="finishSessionBtnContainer" style="display:none;">
@@ -514,5 +568,3 @@
     </div>
 </body>
 </html>
-
-
