@@ -20,7 +20,8 @@ CAMBRIDGE_BY_CEFR: Dict[str, str] = {"A1": "KET", "A2": "KET", "B1": "PET", "B2"
 
 
 class StartRequest(BaseModel):
-    start_level: Optional[str] = Field(default="A2", description="Initial CEFR level A1–C2")
+    # start_level is now fixed to A2, no user selection
+    pass
 
 
 class Answer(BaseModel):
@@ -54,12 +55,7 @@ _sessions: Dict[str, ListenSession] = {}
 
 
 def _validate_cefr(level: Optional[str]) -> str:
-    if not level:
-        return "A2"
-    level_u = level.upper()
-    if level_u not in CEFR_ORDER:
-        raise HTTPException(status_code=400, detail=f"level_cefr must be one of {CEFR_ORDER}")
-    return level_u
+    return "A2"
 
 
 def _map_band_to_exam(band: str) -> str:

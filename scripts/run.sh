@@ -9,6 +9,14 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 python -m pip install --upgrade pip setuptools wheel >/dev/null || true
 pip install -r "$ROOT_DIR/requirements.txt"
 
+# Load environment variables from .env file if it exists
+if [ -f "$ROOT_DIR/.env" ]; then
+    echo "Loading environment variables from $ROOT_DIR/.env"
+    set -a
+    . "$ROOT_DIR/.env"
+    set +a
+fi
+
 # Check for Tesseract OCR and install if not found (assumes Debian/Ubuntu-based system)
 if ! command -v tesseract &> /dev/null
 then

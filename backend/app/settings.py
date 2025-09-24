@@ -13,6 +13,13 @@ class Settings(BaseSettings):
 	vertex_region: str = Field(default="us-central1", validation_alias="GEMINI_VERTEX_REGION")
 	vertex_project: str | None = Field(default=None, validation_alias="GEMINI_VERTEX_PROJECT")
 
+	# OpenRouter fallback configuration (optional)
+	openrouter_api_key: str | None = Field(default=None, validation_alias="OPENROUTER_API_KEY")
+	openrouter_model: str = Field(default="x-ai/grok-4-fast:free", validation_alias="OPENROUTER_MODEL")
+	openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1/chat/completions", validation_alias="OPENROUTER_BASE_URL")
+	openrouter_referer: str = Field(default="https://localhost", validation_alias="OPENROUTER_HTTP_REFERER")
+	openrouter_title: str = Field(default="Adaptive English Placement", validation_alias="OPENROUTER_TITLE")
+
 	# Auth configuration (simple in-memory user store via env)
 	jwt_secret_key: str = Field(default="change-me", validation_alias="JWT_SECRET_KEY")
 	jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")

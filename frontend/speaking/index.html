@@ -122,6 +122,7 @@
         }
 
         async function beginRecording(recordSeconds){
+            console.log('beginRecording called');
             $('prep').style.display = 'none';
             $('record').style.display = 'block';
             $('recordBtn').textContent = 'Stop';
@@ -132,16 +133,50 @@
             asrFinalText = '';
             recordedChunks = [];
             const subBtnHide = $('submitBtn'); if (subBtnHide) subBtnHide.style.display = 'none';
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) recordedChunks.push(e.data); };
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-                $('audioPlayback').src = URL.createObjectURL(blob);
-                // Reveal Submit button after recording stops
-                const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
-            };
-            mediaRecorder.start();
+            try {
+                if (!window.MediaRecorder) {
+                    throw new Error("Browser incompatibility: MediaRecorder not supported.");
+                }
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.log('getUserMedia successful');
+                mediaRecorder = new MediaRecorder(stream);
+                if (!mediaRecorder) {
+                    console.error("Failed to create MediaRecorder. mediaRecorder is null.");
+                    throw new Error("Failed to create MediaRecorder. Microphone access might be denied or not available.");
+                }
+                mediaRecorder.ondataavailable = (e) => { 
+                    if(e.data.size > 0) {
+                        recordedChunks.push(e.data);
+                        console.log('ondataavailable: chunk size', e.data.size, 'total chunks', recordedChunks.length);
+                    }
+                };
+                mediaRecorder.onstop = () => {
+                    console.log('mediaRecorder.onstop fired. Total chunks:', recordedChunks.length);
+                    const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+                    recordedAudioBlob = blob; // Store the blob
+                    $('audioPlayback').src = URL.createObjectURL(blob);
+                    // Reveal Submit button after recording stops
+                    const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
+                    console.log('Submit button visibility:', sub ? sub.style.display : 'N/A');
+                };
+                mediaRecorder.start();
+                console.log('mediaRecorder started');
+            } catch (err) {
+                console.error('Microphone access/MediaRecorder failed:', err);
+                let errorMessage = 'Microphone error: ';
+                if (err.name === 'NotAllowedError') {
+                    errorMessage += 'Access denied. Please allow microphone access in your browser settings.';
+                } else if (err.name === 'NotFoundError') {
+                    errorMessage += 'No microphone found. Please ensure a microphone is connected and recognized by your system.';
+                } else if (err.message.includes('MediaRecorder not supported')) {
+                    errorMessage += 'Browser incompatibility: MediaRecorder is not supported. Please try a different browser (e.g., Chrome, Firefox).';
+                } else {
+                    errorMessage += 'An unexpected error occurred: ' + err.message;
+                }
+                alert(errorMessage);
+                stopRecording();
+                return;
+            }
 
             let remaining = parseInt($('recordTimer').textContent, 10) || 60;
             if(countdownInterval) clearInterval(countdownInterval);
@@ -156,9 +191,11 @@
         }
 
         function stopRecording(){
+            console.log('stopRecording called');
             if(countdownInterval) clearInterval(countdownInterval);
             if(mediaRecorder && mediaRecorder.state !== 'inactive'){
                 mediaRecorder.stop();
+                console.log('mediaRecorder stopped');
             }
             try{ if(recognition) recognition.stop(); } catch(_) {}
             isRecording = false;
@@ -168,6 +205,7 @@
             $('recordBtn').disabled = true;
             // Show Submit button; user must submit manually
             const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
+            console.log('Submit button visibility (stopRecording):', sub ? sub.style.display : 'N/A');
         }
 
         function blobToBase64(blob) {
@@ -218,53 +256,35 @@
             $('recordBtn').textContent = 'Start';
             $('recordBtn').disabled = false;
             const subBtn = $('submitBtn'); if (subBtn) subBtn.style.display = 'none';
+            if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
             const as = $('autostart');
-            const ast = $('autostartTimer');
-            if (as && ast) {
-                let remain = 5;
-                ast.textContent = remain;
+            if (as) {
                 as.style.display = 'block';
-                if (countdownInterval) clearInterval(countdownInterval);
-                countdownInterval = setInterval(() => {
-                    if (isRecording) { clearInterval(countdownInterval); return; }
-                    remain -= 1;
-                    ast.textContent = remain;
-                    if (remain <= 0){
-                        clearInterval(countdownInterval);
-                        beginRecording(recordSeconds);
-                    }
-                }, 1000);
+                as.innerHTML = 'Click <strong>Start</strong> when you are ready to record.';
             }
         }
 
         let recordedAudioBlob = null;
 
-        // ... (rest of the code)
-
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-                recordedAudioBlob = blob; // Store the blob
-                $('audioPlayback').src = URL.createObjectURL(blob);
-                // Reveal Submit button after recording stops
-                const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
-            };
-            mediaRecorder.start();
-
-        // ... (rest of the code)
-
         async function attemptSubmit(){
+            console.log('attemptSubmit called');
             if (submitTriggered) return;
             submitTriggered = true;
             const text = (transcriptText || '').trim();
             const cleaned = cleanTranscript(text);
+            console.log('Transcript (cleaned):', cleaned);
+            console.log('Recorded audio blob:', recordedAudioBlob);
             if (!cleaned) {
                 const warn = $('asrWarning');
                 if (warn) warn.textContent = 'No transcript captured. Please ensure microphone and speech recognition permissions are granted and use a supported browser (Chrome).';
+                console.warn('No transcript captured.');
             }
             try{
                 const resp = await submitAnswer($('sessionId').value, $('itemId').value, cleaned, recordedAudioBlob);
+                console.log('submitAnswer response:', resp);
                 handleAnswer(resp);
             }catch(e){
+                console.error('submitAnswer failed:', e);
                 alert(String(e.message || e));
             }
         }
@@ -280,7 +300,9 @@
                 $('guidance').textContent = '';
                 $('prep').style.display = 'none';
                 $('record').style.display = 'none';
-                const nxc = $('nextCard'); if (nxc) nxc.style.display = 'none';
+                const nxc = $('nextCard'); if (nxc) nxc.style.display = 'block';
+                const continueBtn = $('continueBtn'); if (continueBtn) continueBtn.style.display = 'none';
+                const finishBtnContainer = $('finishSessionBtnContainer'); if (finishBtnContainer) finishBtnContainer.style.display = 'block';
                 return;
             }
             // Hold the next item until user reviews feedback and clicks Continue
@@ -301,6 +323,19 @@
             const nxc = $('nextCard'); if (nxc) nxc.style.display = 'block';
         }
 
+        function updateAuthHeader(){
+            const st = $('authState');
+            const link = $('loginLink');
+            if (!st) return;
+            if (token) {
+                st.textContent = username ? `Logged in as ${username}` : 'Logged in';
+                if (link) link.style.display = 'none';
+            } else {
+                st.textContent = 'Logged out';
+                if (link) link.style.display = 'inline';
+            }
+        }
+
         async function validateToken(){
             if (!token) return false;
             try{
@@ -310,8 +345,7 @@
                 if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
                 return true;
             }catch(_){
-                try { localStorage.removeItem('token'); } catch(_) {}
-                try { localStorage.removeItem('username'); } catch(_) {}
+                try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
                 token = null; username = null;
                 return false;
             }
@@ -321,9 +355,7 @@
             const ok = await validateToken();
             if (ok) {
                 $('module').style.display = 'block';
-                const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
-                if (st) { st.textContent = username ? `Logged in as ${username}` : 'Logged in'; }
-                if (link) { link.style.display = 'none'; }
+                updateAuthHeader();
                 const lc = document.getElementById('login-card'); if (lc) lc.style.display = 'none';
             } else {
                 const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
@@ -335,12 +367,10 @@
                 $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
                 try{
                     token = await login($('username').value, $('password').value);
-                    username = $('username').value || localStorage.getItem('username');
-                    $('loginMsg').textContent = 'Logged in';
+                    username = $('username').value || null;
+                    $('loginMsg').textContent = username ? `Logged in as ${username}` : 'Logged in';
                     $('module').style.display = 'block';
-                    const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
-                    if (st) { st.textContent = username ? `Logged in as ${username}` : 'Logged in'; }
-                    if (link) { link.style.display = 'none'; }
+                    updateAuthHeader();
                     const lc = document.getElementById('login-card'); if (lc) lc.style.display = 'none';
                 }catch(e){
                     $('loginMsg').textContent = 'Login failed';
@@ -351,11 +381,13 @@
 
             $('startBtn').addEventListener('click', async () => {
                 $('startBtn').disabled = true; $('status').textContent = 'Starting…';
+                let sessionInitialized = false;
                 try{
                     // revalidate token before starting
                     const ok = await validateToken();
                     if (!ok) throw new Error('Please log in');
                     session = await startSession();
+                    sessionInitialized = true;
                     $('status').textContent = `Level: ${session.level} (${session.progress_current}/${session.progress_total})`;
                     $('prompt').textContent = session.item.prompt;
                     $('guidance').textContent = session.item.guidance || '';
@@ -368,7 +400,10 @@
                     await startPrepAndRecord(session.item.prep_seconds, session.item.record_seconds);
                     $('sessionId').value = session.session_id;
                     $('itemId').value = session.item.id;
+                    const continueBtn = $('continueBtn'); if (continueBtn) continueBtn.style.display = 'block';
+                    const finishBtnContainer = $('finishSessionBtnContainer'); if (finishBtnContainer) finishBtnContainer.style.display = 'none';
                 }catch(e){
+                    console.error('Start session failed:', e);
                     if (String(e.message || e).includes('401')) {
                         try { localStorage.removeItem('token'); } catch(_) {}
                         try { localStorage.removeItem('username'); } catch(_) {}
@@ -378,8 +413,12 @@
                         if (link) { link.style.display = 'inline'; }
                         const lc = document.getElementById('login-card'); if (lc) lc.style.display = 'block';
                         $('status').textContent = 'Please log in';
-                    } else {
+                    } else if (!sessionInitialized) {
                         $('status').textContent = 'Failed to start session';
+                    } else {
+                        const level = session && session.level ? session.level : 'Session';
+                        $('status').textContent = `Ready — ${level} active`;
+                        console.warn('Session started with follow-up issue:', e);
                     }
                 }finally{
                     $('startBtn').disabled = false;
@@ -473,7 +512,7 @@
 
             <div id="record" style="margin-top:12px; display:none">
                 <div>Recording… <span class="timer" id="recordTimer">60</span>s</div>
-                <div id="autostart" class="small" style="margin-top:4px; display:none">Auto-starting in <span class="timer" id="autostartTimer">5</span>s…</div>
+                <div id="autostart" class="small" style="margin-top:4px; display:none">Click <strong>Start</strong> when you are ready to record.</div>
                 <div id="asrWarning" class="small" style="margin-top:4px"></div>
                 <div class="row" style="margin-top:8px">
                     <button id="recordBtn">Start</button>
@@ -502,10 +541,10 @@
             <div class="row" style="justify-content:flex-end">
                 <button id="continueBtn">Next Assignment</button>
             </div>
+            <div style="margin-top: 16px;" id="finishSessionBtnContainer" style="display:none;">
+                <button onclick="window.location.href = '/app/';">Session finished — back to home</button>
+            </div>
         </div>
     </div>
 </body>
 </html>
-
-
-

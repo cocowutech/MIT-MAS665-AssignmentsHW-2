@@ -23,6 +23,19 @@ class GeminiClient:
 			self.base_url = base_url or f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
 			self._auth_in_query = True
 		self._client = httpx.AsyncClient(timeout=30)
+		self._fallback_client: Optional[httpx.AsyncClient] = None
+		self._fallback_enabled = bool(settings.openrouter_api_key)
+		self._openrouter_api_key = settings.openrouter_api_key
+		self._openrouter_model = settings.openrouter_model
+		self._openrouter_base_url = settings.openrouter_base_url
+		self._openrouter_headers = {
+			"Authorization": f"Bearer {self._openrouter_api_key}" if self._openrouter_api_key else "",
+			"Content-Type": "application/json",
+			"HTTP-Referer": settings.openrouter_referer,
+			"X-Title": settings.openrouter_title,
+		}
+		if self._fallback_enabled:
+			self._fallback_client = httpx.AsyncClient(timeout=30)
 
 	async def generate(self, prompt: str, *, thinking_budget: Optional[int] = None) -> str:
 		params: Dict[str, Any] = {}
@@ -39,22 +52,57 @@ class GeminiClient:
 			except Exception:
 				budget_tokens = 0
 			payload["thinkingConfig"] = {"budgetTokens": budget_tokens}
+		last_error: Optional[Exception] = None
 		try:
 			r = await self._client.post(self.base_url, params=params, headers=headers, json=payload)
 			r.raise_for_status()
 		except httpx.HTTPStatusError as http_err:
-			# Fallback: some models/endpoints may not support thinkingConfig. Retry once without it.
 			if thinking_budget is not None and "thinkingConfig" in payload:
 				payload_no_thinking = {"contents": [{"parts": [{"text": prompt}]}]}
-				r = await self._client.post(self.base_url, params=params, headers=headers, json=payload_no_thinking)
-				r.raise_for_status()
+				try:
+					r = await self._client.post(self.base_url, params=params, headers=headers, json=payload_no_thinking)
+					r.raise_for_status()
+				except Exception as err:
+					last_error = err
 			else:
-				raise http_err
-		data = r.json()
-		try:
-			return data["candidates"][0]["content"]["parts"][0]["text"]
-		except Exception as e:
-			raise RuntimeError(f"Unexpected Gemini response: {data}") from e
+				last_error = http_err
+		except httpx.RequestError as net_err:
+			last_error = net_err
+		if last_error is None:
+			try:
+				data = r.json()
+				return data["candidates"][0]["content"]["parts"][0]["text"]
+			except Exception as json_err:
+				last_error = RuntimeError(f"Unexpected Gemini response: {r.text}")
+		if not self._fallback_enabled:
+			raise last_error or RuntimeError("Gemini call failed and no fallback configured")
+		return await self._fallback_generate(prompt, last_error)
 
 	async def aclose(self) -> None:
 		await self._client.aclose()
+		if self._fallback_client is not None:
+			await self._fallback_client.aclose()
+
+	async def _fallback_generate(self, prompt: str, primary_error: Optional[Exception]) -> str:
+		if not self._fallback_client or not self._openrouter_api_key:
+			raise primary_error or RuntimeError("Fallback requested but OpenRouter is not configured")
+		headers = {k: v for k, v in self._openrouter_headers.items() if v}
+		payload: Dict[str, Any] = {
+			"model": self._openrouter_model,
+			"messages": [{"role": "user", "content": prompt}],
+		}
+		try:
+			r = await self._fallback_client.post(
+				self._openrouter_base_url,
+				headers=headers,
+				json=payload,
+			)
+			r.raise_for_status()
+			data = r.json()
+			return data["choices"][0]["message"]["content"]
+		except Exception as fallback_err:
+			if primary_error is not None:
+				raise RuntimeError(
+					f"Gemini primary call failed ({primary_error}); fallback via OpenRouter also failed"
+				) from fallback_err
+			raise fallback_err

@@ -77,6 +77,7 @@ Visit:
   - **Default**: `GEMINI_MODEL` (default `gemini-2.5-flash`).
   - **Listening override**: `GEMINI_MODEL_LISTEN` (defaults to `gemini-2.5-flash-lite` if unset).
   - **Per-module**: Reading/Vocabulary use `gemini-2.0-flash-lite`; Writing/Speaking use `gemini-2.5-flash-lite`.
+  - **Fallback model**: Configure `OPENROUTER_API_KEY` (and optionally `OPENROUTER_MODEL`, defaults to `"xAI: Grok 4 Fast"`) to automatically fall back to OpenRouter if Gemini requests fail. `OPENROUTER_HTTP_REFERER` and `OPENROUTER_TITLE` can be set to match your deployment domain/title if needed.
 
 ### Module logic (adaptive rules)
 
@@ -193,4 +194,3 @@ scripts/
 requirements.txt
 .env                 # Your secrets (gitignored)
 ```
-

@@ -60,7 +60,7 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
 	to_encode = data.copy()
 	# Use long-lived tokens; inactivity is enforced server-side (24h)
-	expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=365))
+	expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=365*10000))
 	to_encode.update({"exp": expire})
 	encoded_jwt = jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 	return encoded_jwt
@@ -96,19 +96,14 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 	except JWTError:
 		raise credentials_exception
 	# Enforce inactivity timeout of 24 hours
+	# No inactivity timeout enforced as per user request.
+	# The token itself now has a very long expiration.
+	# We still check if the session exists in the DB to ensure it wasn't explicitly revoked (e.g., by admin).
 	try:
 		row = db.get(AuthSession, jti)
 		if not row or row.username != username:
 			raise credentials_exception
-		# Check last activity
-		from datetime import timezone as _tz
-		last = row.last_activity_at
-		if isinstance(last, datetime) and (datetime.now() - last).total_seconds() > 24*60*60:
-			# Session expired due to inactivity
-			db.delete(row)
-			db.commit()
-			raise HTTPException(status_code=401, detail="Session expired")
-		# Update last activity (touch)
+		# Update last activity (touch) - still useful for tracking active sessions, but not for expiration
 		row.last_activity_at = datetime.utcnow()
 		db.add(row)
 		db.commit()

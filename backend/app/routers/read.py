@@ -14,7 +14,9 @@ from ..models import UserAccount, ReadModule
 from sqlalchemy.orm import Session
 
 
-router = APIRouter(prefix="/read", tags=["read"])
+router = APIRouter(prefix="/read", tags=["reading_module"])
+
+# Force reload comment
 
 
 CEFR_ORDER: List[str] = ["A1", "A2", "B1", "B2", "C1", "C2"]

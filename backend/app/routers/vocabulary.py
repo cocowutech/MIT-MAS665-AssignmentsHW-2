@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import uuid
+import httpx
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -167,6 +168,13 @@ JSON schema to return exactly:
                 rationale=rationale,
             )
             return q
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 503:
+                print(f"Gemini API unavailable (503). No question could be generated. Error: {e}")
+                raise HTTPException(status_code=503, detail="Gemini API unavailable. No question could be generated.")
+            else:
+                last_error = e
+                continue
         finally:
             await client.aclose()
 

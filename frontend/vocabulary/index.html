@@ -82,20 +82,34 @@
             currentQuestionId = q.id;
             currentAnswerIndex = q.answer_index;
             $('passage').textContent = q.passage;
-            $('qtext').textContent = q.question;
-            const opts = $('options');
-            opts.innerHTML = '';
-            q.options.forEach((opt, idx) => {
-                const div = document.createElement('div');
-                div.className = 'option';
-                div.textContent = opt;
-                div.onclick = () => selectOption(idx);
-                opts.appendChild(div);
-            });
-            $('feedback').textContent = '';
-            $('submitBtn').disabled = true;
-            $('nextBtn').style.display = 'none';
-            $('submitBtn').style.display = 'inline-block';
+
+            if (q.passage.includes("The Gemini API is currently unavailable.")) {
+                $('qtext').style.display = 'none';
+                $('qtext').textContent = ''; // Clear any default question text
+                $('options').style.display = 'none';
+                $('submitBtn').style.display = 'none';
+                $('feedback').textContent = "The Gemini API is currently unavailable. Please try again later.";
+                $('nextBtn').style.display = 'inline-block';
+                $('nextBtn').textContent = 'Back to home';
+                $('nextBtn').onclick = () => { window.location.href = '/app/'; };
+            } else {
+                $('qtext').style.display = 'block';
+                $('options').style.display = 'grid';
+                $('submitBtn').style.display = 'inline-block';
+                $('qtext').textContent = q.question;
+                const opts = $('options');
+                opts.innerHTML = '';
+                q.options.forEach((opt, idx) => {
+                    const div = document.createElement('div');
+                    div.className = 'option';
+                    div.textContent = opt;
+                    div.onclick = () => selectOption(idx);
+                    opts.appendChild(div);
+                });
+                $('feedback').textContent = '';
+                $('submitBtn').disabled = true;
+                $('nextBtn').style.display = 'none';
+            }
         }
 
         let selectedIndex = null;
@@ -116,7 +130,18 @@
                     body: JSON.stringify({ session_id: sessionId, question_id: currentQuestionId, choice_index: selectedIndex })
                 });
                 const j = await r.json();
-                if (!r.ok) throw new Error(j.detail || 'answer failed');
+                if (!r.ok) {
+                    // Handle 503 error specifically
+                    if (r.status === 503) {
+                        $('feedback').textContent = j.detail || 'Gemini API unavailable. No question could be generated.';
+                        Array.from(document.querySelectorAll('.option')).forEach(el => el.style.pointerEvents = 'none'); // Disable options
+                        $('submitBtn').style.display = 'none'; // Hide submit button
+                        $('retryBtn').style.display = 'inline-block'; // Show retry button
+                    } else {
+                        throw new Error(j.detail || 'answer failed');
+                    }
+                    return;
+                }
                 $('sessionMeta').textContent = `Level: ${j.level} • ${j.progress_current}/${j.progress_total}`;
                 $('feedback').textContent = (j.correct ? 'Correct. ' : 'Incorrect. ') + (j.explanation || '');
                 const opts = document.querySelectorAll('.option');
@@ -146,6 +171,31 @@
             if (!st) return;
             if (token) { st.textContent = username ? `Logged in as ${username}` : 'Logged in'; if (link) link.style.display='none'; }
             else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
+        }
+
+        async function retryGenerateQuestion() {
+            $('retryBtn').disabled = true; $('feedback').textContent = 'Retrying…';
+            try {
+                // Attempt to fetch the next question for the current session
+                const r = await fetch('/vocabulary/answer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ session_id: sessionId, question_id: currentQuestionId, choice_index: selectedIndex }) // Send last answer again, but expect a new question
+                });
+                const j = await r.json();
+                if (!r.ok) {
+                    throw new Error(j.detail || 'retry failed');
+                }
+                // If successful, re-render the question and hide retry button
+                renderQuestion(j);
+                Array.from(document.querySelectorAll('.option')).forEach(el => el.style.pointerEvents = 'auto'); // Re-enable options
+                $('retryBtn').style.display = 'none';
+                $('submitBtn').style.display = 'inline-block';
+            } catch (e) {
+                $('feedback').textContent = String(e);
+            } finally {
+                $('retryBtn').disabled = false;
+            }
         }
 
         window.addEventListener('DOMContentLoaded', async () => {
@@ -187,6 +237,7 @@
             });
 
             $('submitBtn').addEventListener('click', submitAnswer);
+            $('retryBtn').addEventListener('click', retryGenerateQuestion);
         });
     </script>
 </head>
@@ -240,6 +291,7 @@
             <div style="margin-top:12px">
                 <button id="submitBtn" disabled>Submit</button>
                 <button id="nextBtn" style="display:none">Next</button>
+                <button id="retryBtn" style="display:none">Retry generate an answer</button>
             </div>
             <div id="feedback" class="small" style="margin-top:8px"></div>
         </div>

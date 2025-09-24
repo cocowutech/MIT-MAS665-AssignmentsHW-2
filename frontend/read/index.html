@@ -77,11 +77,18 @@
        <div id="qText"></div>
        <div class="choices" id="choices"></div>
        <div id="feedback" class="small" style="margin-top:8px"></div>
+       <div style="margin-top: 12px;">
+         <button id="nextQuestionBtn" style="display:none;" onclick="loadNextQuestion()">Next</button>
+         <button id="retrySubmitBtn" style="display:none;" onclick="retrySubmit()">Retry</button>
+       </div>
      </div>
 
      <div class="card" id="finish-card" style="display:none">
        <h3>Finished</h3>
        <div id="summary"></div>
+       <div style="margin-top: 16px;">
+         <button onclick="window.location.href = '/app/';">Session finished — back to home</button>
+       </div>
      </div>
    </div>
 
@@ -228,33 +235,172 @@
         });
        if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
        if (!r.ok) throw new Error(await r.text());
-        const j = await r.json();
-        const correctIdx = j.correct_choice_index;
-        buttons.forEach((b, idx) => {
-          if (idx === correctIdx) b.classList.add('correct');
-          if (idx === choiceIndex && idx !== correctIdx) b.classList.add('incorrect');
-        });
-        $('feedback').textContent = (j.correct ? 'Correct. ' : 'Incorrect. ') + (j.rationale || '');
-        if (j.finished) {
-          $('finish-card').style.display = 'block';
-          $('summary').textContent = `Total ${j.summary.total}. Correct ${j.summary.correct}. Incorrect ${j.summary.incorrect}. Start ${j.summary.start_cefr} → End ${j.summary.end_cefr}.`;
-          try { localStorage.setItem('last_session_end_cefr', j.summary.end_cefr); } catch(_) {}
-        } else if (j.next_question) {
-          if (j.new_passage) {
-            currentPassageIndex = j.passage_index;
-            maxPassages = j.max_passages;
-            questionsPerPassage = j.questions_per_passage;
-            $('passage').textContent = j.new_passage;
-            $('levelInfo').textContent = `Passage ${currentPassageIndex}/${maxPassages} • Target: CEFR ${j.updated_target_cefr} (${j.cambridge_level}) • ${questionsPerPassage} Q per passage • Total: ${totalQuestions}`;
-          }
-          setTimeout(() => renderQuestion(j.next_question), 600);
-        }
-      } catch (e) {
-        $('feedback').textContent = String(e);
-      }
-    }
-   </script>
- </body>
- </html>
-
+               const j = await r.json();
+               const correctIdx = j.correct_choice_index;
+               buttons.forEach((b, idx) => {
+                 if (idx === correctIdx) b.classList.add('correct');
+                 if (idx === choiceIndex && idx !== correctIdx) b.classList.add('incorrect');
+               });
+               $('feedback').textContent = (j.correct ? 'Correct. ' : 'Incorrect. ') + (j.rationale || '');
+               if (j.finished) {
+                 $('finish-card').style.display = 'block';
+                 $('summary').textContent = `Total ${j.summary.total}. Correct ${j.summary.correct}. Incorrect ${j.summary.incorrect}. Start ${j.summary.start_cefr} → End ${j.summary.end_cefr}.`;
+                 try { localStorage.setItem('last_session_end_cefr', j.summary.end_cefr); } catch(_) {}
+               } else if (j.next_question) {
+                 $('nextQuestionBtn').style.display = 'block';
+                 window.nextQuestionData = j.next_question; // Store next question data globally
+                 if (j.new_passage) {
+                   currentPassageIndex = j.passage_index;
+                   maxPassages = j.max_passages;
+                   questionsPerPassage = j.questions_per_passage;
+                   $('passage').textContent = j.new_passage;
+                   $('levelInfo').textContent = `Passage ${currentPassageIndex}/${maxPassages} • Target: CEFR ${j.updated_target_cefr} (${j.cambridge_level}) • ${questionsPerPassage} Q per passage • Total: ${totalQuestions}`;
+                 }
+               }
+             } catch (e) {
+               if (e.message && e.message.includes('503 Service Unavailable')) {
+                 $('feedback').textContent = 'Error: 503 Service Unavailable. Please try again.';
+                 buttons.forEach(b => b.disabled = true);
+                 $('nextQuestionBtn').style.display = 'none';
+                 $('retrySubmitBtn').style.display = 'inline-block';
+               } else {
+                 $('feedback').textContent = String(e);
+               }
+             }
+           }
+        
+           function loadNextQuestion() {
+             $('nextQuestionBtn').style.display = 'none';
+             renderQuestion(window.nextQuestionData);
+           }
+        
+           async function retrySubmit() {
+             $('retrySubmitBtn').disabled = true;
+             $('feedback').textContent = 'Retrying…';
+             const buttons = Array.from(document.querySelectorAll('.choice'));
+             buttons.forEach(b => b.disabled = false);
+             $('retrySubmitBtn').style.display = 'none';
+             await submit(window.lastChoiceIndex); // Re-submit the last choice
+             $('retrySubmitBtn').disabled = false;
+           }
+        
+           // Store the last choice index globally for retry functionality
+           let lastChoiceIndex = null;
+        
+           $('loginBtn').addEventListener('click', async () => {
+              $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
+              try {
+                const form = new URLSearchParams();
+                form.set('username', $('username').value);
+                form.set('password', $('password').value);
+                const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+                if (!r.ok) throw new Error('login failed');
+               const j = await r.json(); token = j.access_token; username = $('username').value || null;
+               try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch(_) {}
+               $('loginMsg').textContent = username ? `Logged in as ${username}` : 'Logged in';
+               $('start-card').style.display = 'block';
+               $('login-card').style.display = 'none';
+               updateAuthHeader();
+              } catch (e) {
+                $('loginMsg').textContent = 'Login failed';
+              } finally { $('loginBtn').disabled = false; }
+            });
+        
+            $('startBtn').addEventListener('click', async () => {
+              $('startBtn').disabled = true; $('startMsg').textContent = 'Starting…';
+              $('finish-card').style.display = 'none'; // Hide finish card on new session start
+             try {
+                const lastEndCefr = localStorage.getItem('last_session_end_cefr');
+                const requestBody = lastEndCefr ? { start_level: lastEndCefr } : {};
+        
+                const r = await fetch('/read/session/start', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                  body: JSON.stringify(requestBody)
+                });
+               if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
+               if (!r.ok) throw new Error(await r.text());
+                const j = await r.json();
+                sessionId = j.session_id;
+                $('passage').textContent = j.passage;
+                currentPassageIndex = j.passage_index;
+                maxPassages = j.max_passages;
+                questionsPerPassage = j.questions_per_passage;
+                totalQuestions = j.total_questions;
+                $('levelInfo').textContent = `Passage ${currentPassageIndex}/${maxPassages} • Target: CEFR ${j.target_cefr} (${j.cambridge_level}) • ${questionsPerPassage} Q per passage • Total: ${totalQuestions}`;
+                renderQuestion(j.question);
+                $('passage-card').style.display = 'block';
+                $('question-card').style.display = 'block';
+                $('startMsg').textContent = '';
+              } catch (e) {
+                $('startMsg').textContent = String(e);
+              } finally { $('startBtn').disabled = false; }
+            });
+        
+            function renderQuestion(q) {
+              if (!q) return;
+              lastQuestionId = q.id;
+              $('qHeader').textContent = `Question ${q.number}`;
+              $('qMeta').textContent = `CEFR ${q.level_cefr} (${q.cambridge_level}) • Passage ${currentPassageIndex}/${maxPassages}`;
+              $('qText').textContent = q.text;
+              $('feedback').textContent = '';
+              const container = $('choices');
+              container.innerHTML = '';
+              q.choices.forEach((choice, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'choice';
+                btn.textContent = choice;
+                btn.onclick = () => submit(idx);
+                container.appendChild(btn);
+              });
+              $('retrySubmitBtn').style.display = 'none'; // Hide retry button on new question
+            }
+        
+            async function submit(choiceIndex) {
+              window.lastChoiceIndex = choiceIndex; // Store the last choice
+              const buttons = Array.from(document.querySelectorAll('.choice'));
+              buttons.forEach(b => b.disabled = true);
+              $('feedback').textContent = 'Checking…';
+             try {
+                const r = await fetch('/read/session/submit', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                  body: JSON.stringify({ session_id: sessionId, question_id: lastQuestionId, choice_index: choiceIndex })
+                });
+               if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
+               if (!r.ok) throw new Error(await r.text());
+                const j = await r.json();
+                const correctIdx = j.correct_choice_index;
+                buttons.forEach((b, idx) => {
+                  if (idx === correctIdx) b.classList.add('correct');
+                  if (idx === choiceIndex && idx !== correctIdx) b.classList.add('incorrect');
+                });
+                $('feedback').textContent = (j.correct ? 'Correct. ' : 'Incorrect. ') + (j.rationale || '');
+                if (j.finished) {
+                  $('finish-card').style.display = 'block';
+                  $('summary').textContent = `Total ${j.summary.total}. Correct ${j.summary.correct}. Incorrect ${j.summary.incorrect}. Start ${j.summary.start_cefr} → End ${j.summary.end_cefr}.`;
+                  try { localStorage.setItem('last_session_end_cefr', j.summary.end_cefr); } catch(_) {}
+                } else if (j.next_question) {
+                  $('nextQuestionBtn').style.display = 'block';
+                  window.nextQuestionData = j.next_question; // Store next question data globally
+                  if (j.new_passage) {
+                    currentPassageIndex = j.passage_index;
+                    maxPassages = j.max_passages;
+                    questionsPerPassage = j.questions_per_passage;
+                    $('passage').textContent = j.new_passage;
+                    $('levelInfo').textContent = `Passage ${currentPassageIndex}/${maxPassages} • Target: CEFR ${j.updated_target_cefr} (${j.cambridge_level}) • ${questionsPerPassage} Q per passage • Total: ${totalQuestions}`;
+                  }
+                }
+              } catch (e) {
+                $('feedback').textContent = String(e);
+              }
+            }
+        
+            function loadNextQuestion() {
+              $('nextQuestionBtn').style.display = 'none';
+              renderQuestion(window.nextQuestionData);
+            }
+           </script>
+         </body>
+         </html>
 
