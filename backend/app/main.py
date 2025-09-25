@@ -46,32 +46,7 @@ async def redirect_root_to_app():
 def root():
 	return {"status": "ok", "gemini_configured": bool(settings.gemini_api_key)}
 
-# ---- Idle shutdown watchdog (disabled by default; only runs if threshold > 0) ----
-last_request_ts: float | None = None
-
-@app.middleware("http")
-async def update_last_request(request: Request, call_next):
-	global last_request_ts
-	# Only track if watchdog is enabled
-	if getattr(settings, "idle_shutdown_seconds", 0) and settings.idle_shutdown_seconds > 0:
-		last_request_ts = asyncio.get_event_loop().time()
-	return await call_next(request)
-
-async def _idle_watcher():
-	global last_request_ts
-	interval = 5
-	threshold = getattr(settings, "idle_shutdown_seconds", 0) or 0
-	if threshold <= 0:
-		return
-	loop = asyncio.get_event_loop()
-	last_request_ts = loop.time()
-	while True:
-		await asyncio.sleep(interval)
-		if last_request_ts is None:
-			continue
-		if loop.time() - last_request_ts > threshold:
-			os.kill(os.getpid(), signal.SIGTERM)
-			return
+# ---- Idle shutdown watchdog has been removed to keep the app always on ----
 
 async def _cleanup_watcher():
 	# Run once at startup, then daily
@@ -89,9 +64,7 @@ async def _cleanup_watcher():
 			pass
 
 @app.on_event("startup")
-async def start_idle_watcher():
-	# Idle shutdown disabled regardless of configuration; app should always keep running
-	# (No scheduling of _idle_watcher)
+async def startup_event():
 	# Initialize DB schema
 	Base.metadata.create_all(bind=engine)
 	# Apply lightweight dev migrations

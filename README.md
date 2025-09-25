@@ -79,13 +79,10 @@ GEMINI_PROVIDER=vertex
 GEMINI_VERTEX_REGION=us-central1
 GEMINI_VERTEX_PROJECT=your-gcp-project-id
 
-# Authentication & Security
+# Auth (seed user and JWT)
 SEED_USERNAME=rong_wu
 SEED_PASSWORD=mit!23456
-JWT_SECRET_KEY=a-strong-and-secret-key-for-jwt
-
-# Application Behavior
-IDLE_SHUTDOWN_SECONDS=1200 # 20 minutes
+JWT_SECRET_KEY=change-this-in-prod
 ```
 
 **Note**: Make sure to replace placeholder values (`YOUR_GEMINI_API_KEY`, `your-gcp-project-id`, etc.) with your actual credentials.

@@ -54,12 +54,6 @@ GEMINI_VERTEX_REGION=us-central1
 GEMINI_VERTEX_PROJECT=upbeat-legacy-472504-t5
 
 # Auth (seed user and JWT)
-SEED_USERNAME=rong_wu
-SEED_PASSWORD=mit!23456
-JWT_SECRET_KEY=change-this-in-prod
-
-# Idle shutdown (seconds with no requests before exit)
-IDLE_SHUTDOWN_SECONDS=1200
 ```
 
 ### Running the Server

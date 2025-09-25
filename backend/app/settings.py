@@ -28,9 +28,6 @@ class Settings(BaseSettings):
 	seed_username: str | None = Field(default=None, validation_alias="SEED_USERNAME")
 	seed_password_plain: str | None = Field(default=None, validation_alias="SEED_PASSWORD")
 
-	# Idle shutdown (disabled by default; set >0 to enable auto-exit after inactivity)
-	idle_shutdown_seconds: int = Field(default=0, validation_alias="IDLE_SHUTDOWN_SECONDS")
-
 	# Database
 	database_url: str | None = Field(default=None, validation_alias="DATABASE_URL")
 
