@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from sqlalchemy.orm import Session
+
 from .db import Base, engine, get_db, ensure_schema
 from .cleanup import purge_older_than_one_week
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +20,9 @@ import asyncio
 import os
 import signal
 
+BASE_DIR = Path(__file__).resolve().parents[2]
+FRONTEND_DIR = BASE_DIR / "frontend"
+
 app = FastAPI(title="Placement Agent API")
 app.include_router(health.router)
 app.include_router(gemini.router)
@@ -28,9 +34,9 @@ app.include_router(read.router)
 app.include_router(vocabulary.router)
 app.include_router(speaking.router)
 
-# Static frontend at /app
-app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
-app.mount("/register", StaticFiles(directory="frontend/register", html=True), name="register")
+# Static frontend at /app (use absolute paths so cwd doesn't matter when launching)
+app.mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+app.mount("/register", StaticFiles(directory=FRONTEND_DIR / "register", html=True), name="register")
 
 @app.get("/", include_in_schema=False)
 async def redirect_root_to_app():

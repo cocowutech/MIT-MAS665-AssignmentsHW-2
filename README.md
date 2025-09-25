@@ -1,197 +1,146 @@
 # Adaptive English Placement Agent
-## Test me with Comet assistant :X
 
-FastAPI backend with a minimal web UI for login and a Gemini-powered test call. Includes product spec endpoints and idle auto-shutdown.
+This project is a web application designed to provide an AI-powered, adaptive English language proficiency assessment. It uses Google's Gemini API to dynamically generate questions and evaluate user responses across several key language skill modules.
 
-## Prerequisites (WSL Ubuntu)
-- Python 3.12
-- `python3-venv` installed (Ubuntu: `sudo apt-get install -y python3-venv`)
+The application features a FastAPI backend, a lightweight vanilla JavaScript frontend, and a set of adaptive learning modules for Reading, Listening, Writing, Vocabulary, and Speaking.
 
-## Setup
+## ✨ Features
+
+-   **AI-Powered Assessment**: Leverages the Google Gemini API for dynamic content generation and evaluation.
+-   **Adaptive Modules**: Adjusts question difficulty in real-time based on user performance in five key areas:
+    -   Reading Comprehension
+    -   Listening Skills
+    -   Written Expression (with optional OCR for handwritten text)
+    -   Vocabulary and Grammar
+    -   Spoken Fluency
+-   **Secure Authentication**: JWT-based OAuth2 password flow for user management.
+-   **Configurable AI Provider**: Supports both Google Vertex AI and AI Studio for flexibility.
+-   **Persistent State**: Uses a SQLite database to store user and session data.
+-   **Built-in Monitoring**: Includes a `/health` endpoint for health checks and `/spec` for product specifications.
+-   **Automatic Cleanup**: Background tasks to purge old data and manage database size.
+-   **Idle Shutdown**: Automatically shuts down the server after a configurable period of inactivity to conserve resources.
+
+## 🛠️ Tech Stack
+
+-   **Backend**: Python 3.12, FastAPI, Uvicorn
+-   **AI Integration**: Google Gemini API
+-   **Database**: SQLite
+-   **Frontend**: HTML, Vanilla JavaScript
+-   **Authentication**: JWT (OAuth2 Password Flow)
+-   **OCR**: Tesseract-OCR (for the Writing module)
+-   **Settings Management**: Pydantic
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+Ensure you have the following installed on your system (instructions provided for Ubuntu/Debian):
+
+-   **Python 3.12**
+-   **Python Virtual Environment**:
+    ```bash
+    sudo apt-get update && sudo apt-get install -y python3-venv
+    ```
+-   **Tesseract OCR Engine** (required for the image-to-text feature in the Writing module):
+    ```bash
+    sudo apt-get install -y tesseract-ocr
+    ```
+
+### 1. Clone & Set Up the Environment
+
 ```bash
-cd ~/MIT-MAS665-AssignmentsHW-2
+# Navigate to your desired project directory
+# git clone <your-repo-url>
+# cd MIT-MAS665-AssignmentsHW-2
+
+# Create and activate a Python virtual environment
 python3 -m venv .venv
-. .venv/bin/activate
+source .venv/bin/activate
+
+# Install the required Python packages
 pip install -r requirements.txt
 ```
 
-## Configure environment (.env)
-Create or edit `.env` in the project root:
+### 2. Configure Environment Variables
+
+Create a `.env` file in the root of the project directory by copying the example below.
+
 ```bash
-# Required
-GEMINI_API_KEY=YOUR_KEY
+# --- .env file ---
+
+# Required: Gemini API Configuration
+GEMINI_API_KEY=YOUR_GEMINI_API_KEY
 GEMINI_MODEL=gemini-2.5-flash
 
-# Provider: choose ONE
-GEMINI_PROVIDER=vertex            # Vertex AI Express (recommended for AQ.* keys)
-# or
-# GEMINI_PROVIDER=ai_studio       # Google AI Studio (often keys start with AIza)
+# Provider: Choose ONE ("vertex" or "ai_studio")
+GEMINI_PROVIDER=vertex
 
-# Vertex settings (only if using provider=vertex)
+# Vertex AI Settings (only required if GEMINI_PROVIDER=vertex)
 GEMINI_VERTEX_REGION=us-central1
-GEMINI_VERTEX_PROJECT=YOUR_GCP_PROJECT_ID
+GEMINI_VERTEX_PROJECT=your-gcp-project-id
 
-# Auth (seed user and JWT)
-SEED_USERNAME=
-SEED_PASSWORD=
-JWT_SECRET_KEY=change-this-in-prod
+# Authentication & Security
+SEED_USERNAME=rong_wu
+SEED_PASSWORD=mit!23456
+JWT_SECRET_KEY=a-strong-and-secret-key-for-jwt
 
-# Idle shutdown (seconds with no requests before exit)
-IDLE_SHUTDOWN_SECONDS=1200
+# Application Behavior
+IDLE_SHUTDOWN_SECONDS=1200 # 20 minutes
 ```
 
-Notes:
-- For Vertex Express, enable Vertex AI API in `YOUR_GCP_PROJECT_ID` and ensure the API key is allowed for Vertex.
-- For AI Studio, set `GEMINI_PROVIDER=ai_studio` and use a Studio key.
+**Note**: Make sure to replace placeholder values (`YOUR_GEMINI_API_KEY`, `your-gcp-project-id`, etc.) with your actual credentials.
 
-## Run the server
+### 3. Running the Application
+
+You can run the server using the provided shell script.
+
+**To run in the foreground:**
+
 ```bash
 ./scripts/run.sh
-# or run in background (what the setup used):
-./scripts/run.sh >/tmp/placement_api.log 2>&1 & echo $! > /tmp/placement_api.pid
 ```
 
-Visit:
-- Frontend: `http://127.0.0.1:8000/app`
-- Health: `http://127.0.0.1:8000/health`
-- Root: `http://127.0.0.1:8000/`
+**To run as a background process:**
 
-### Module UIs
-- Reading page: `http://127.0.0.1:8000/app/read/`
-  - Model: Gemini 2.0 Flash-Lite (passage + question generation)
-  - Flow: 3 passages × 5 questions (15 total), default start B1, adaptive A1–C2
-- Listening page: `http://127.0.0.1:8000/app/listen/`
-  - Model: Gemini 2.5 Flash-Lite (clip scripts + MCQs)
-  - Flow: 10 items served in pairs; difficulty adjusts after each pair
-- Writing page: `http://127.0.0.1:8000/app/write/`
-  - Model: Gemini 2.5 Flash-Lite (prompt generation and scoring)
-- Vocabulary page: `http://127.0.0.1:8000/app/vocabulary/`
-  - Model: Gemini 2.0 Flash-Lite
-  - Default start level: A2 (adaptive A1–C2)
-- Speaking page: `http://127.0.0.1:8000/app/speaking/`
-  - Model: Gemini 2.5 Flash-Lite
-## How it works
-
-- **Architecture**: FastAPI backend mounts a static frontend at `/app`. JWT auth protects module APIs. A lightweight `GeminiClient` calls Google Gemini via Vertex AI or AI Studio depending on env.
-- **Auth**: OAuth2 password flow at `/auth/token`. A seed dev user comes from `.env` (`SEED_USERNAME`/`SEED_PASSWORD`). Use the token as `Authorization: Bearer <token>`.
-- **Models & providers**:
-  - **Default**: `GEMINI_MODEL` (default `gemini-2.5-flash`).
-  - **Listening override**: `GEMINI_MODEL_LISTEN` (defaults to `gemini-2.5-flash-lite` if unset).
-  - **Per-module**: Reading/Vocabulary use `gemini-2.0-flash-lite`; Writing/Speaking use `gemini-2.5-flash-lite`.
-  - **Fallback model**: Configure `OPENROUTER_API_KEY` (and optionally `OPENROUTER_MODEL`, defaults to `"xAI: Grok 4 Fast"`) to automatically fall back to OpenRouter if Gemini requests fail. `OPENROUTER_HTTP_REFERER` and `OPENROUTER_TITLE` can be set to match your deployment domain/title if needed.
-
-### Module logic (adaptive rules)
-
-- **Reading (`/read`)**
-  - Start: `POST /read/session/start` with optional `start_level` (default B1). Generates a CEFR-aligned passage, then the first MCQ.
-  - Length: 3 passages × 5 questions = 15 items.
-  - Within-passage adaptation: +1 CEFR after 2 consecutive correct; −1 after 2 consecutive incorrect.
-  - End-of-passage adjustment (out of 5): 5→+2, 4→+1 (no change if at C1), 3→0, 2→−1, 0–1→−2. Moves to next passage at the adjusted level.
-  - Final smoothing: after the 3rd passage, adjust ±1 based on the last five outcomes (≥4 correct → +1; ≤1 → −1).
-  - State is cached in memory during the session and summarized to DB (`read_module`) with `start_cefr`/`end_cefr` and counts.
-
-- **Listening (`/listen`)**
-  - Start: `POST /listen/session/start` (default B1). Generates an initial batch of 2 short clip scripts with MCQs; total target = 10.
-  - Adaptation per pair: both correct → +1 CEFR; both incorrect → −1 CEFR. Special C2 rule: any mistake in a pair at C2 decreases level.
-  - The API never returns `correct_index` until the end; it returns public clip fields only.
-  - Finish: returns final CEFR, KET/PET/FCE mapping, and aggregated target vocabulary/structures across all seen clips.
-
-- **Speaking (`/speaking`)**
-  - Start: `POST /speaking/start` with optional `start_level` (default A2). Returns one `SpeakingItem` (prompt + guidance + timings) out of 15.
-  - Adaptation: +1 after 2 consecutive correct; −1 after 2 consecutive incorrect (bounded A1–C2). For MVP, correctness is self-reported via `was_correct`.
-  - Answer: `POST /speaking/answer` advances the session; on completion the session is cleared.
-
-- **Vocabulary (`/vocabulary`)**
-  - Start: `POST /vocabulary/start` begins at A2 by default (override with `start_level` as one of A1–C2). Each item is a short passage with a 4-option vocabulary/grammar MCQ and a brief rationale.
-  - Adaptation: +1 after 2 consecutive correct; −1 after 2 consecutive incorrect; total of 15 items. Rationale is returned with feedback.
-
-- **Writing (`/write`)**
-  - Prompt: `POST /write/prompt` generates one CEFR-aligned prompt mapped to KET/PET/FCE targets.
-  - Scoring (text): `POST /write/score/text` returns CEFR band, KET/PET/FCE mapping, rubric sub-scores, overall, word count, and comments (inline + global). Long inputs are clamped to ~8k chars.
-  - Scoring (image): `POST /write/score/image` runs OCR (requires `tesseract-ocr`, `pytesseract`, `Pillow`) then scores as text.
-  - Default band helper: `GET /write/default_band` suggests a band based on `read_module.end_cefr` when available.
-
-### Persistence & cleanup
-
-- DB: SQLite by default at `sqlite:///./app.db` (override with `DATABASE_URL`). Tables are created on startup. Minor dev migrations run via `ensure_schema()`.
-- Models: `auth_users`, `user_accounts`, and per-module tables (`read_module`, `write_module`, `listen_module`, `vocabulary_module`, `speaking_module`). Modules store last-session metadata/snapshots.
-- Cleanup: a background task purges module rows older than 7 days and removes dormant users without recent module rows.
-
-
-## Login and talk
-Default seed user (from `.env`) - removed for now.
-- username: ``
-- password: ``
-
-## Writing module
-
-- Endpoints (JWT required):
-  - `POST /write/prompt` → body `{ "band": "A2|B1|B2|C1", "topic?": string }` → returns `{ prompt, band, exam_task, targets }` where targets include `target_vocab` and `target_structures` aligned to KET/PET/FCE.
-  - `POST /write/score/text` → body `{ "text": string, "band_hint?": "A2|B1|B2|C1" }` → returns JSON with `band`, `exam_mapping`, `scores` (content, organization, language_control, range), `overall`, `word_count`, `comments` (global + inline annotations).
-  - `POST /write/score/image` → multipart form with `file` (image) and optional `band_hint` → runs OCR then scores as above.
-
-- Frontend at `/app/write/` supports:
-  - Login → Generate prompt aligned to band (auto-generated by Gemini)
-  - Type text and score OR upload an image (OCR + score)
-  - Displays band estimate, rubric sub-scores, and inline comments
-
-### OCR setup
-
-Install system dependency for OCR (WSL/Ubuntu):
 ```bash
-sudo apt-get update && sudo apt-get install -y tesseract-ocr
+./scripts/run.sh > /tmp/placement_api.log 2>&1 & echo $! > /tmp/placement_api.pid
 ```
 
-Python deps are in `requirements.txt`: `pytesseract`, `Pillow`, `python-multipart`.
+The application will be available at `http://127.0.0.1:8000`.
 
-Via frontend:
-- Open `http://127.0.0.1:8000/app`, log in, and press Generate.
+## 🌐 Accessing the Application
 
-Via API (curl):
-```bash
-# Get token
-curl -s -X POST http://127.0.0.1:8000/auth/token \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  -d 'username=rong_wu&password=mit!23456'
+-   **Main Login Page**: `http://127.0.0.1:8000/app`
+-   **Health Check**: `http://127.0.0.1:8000/health`
+-   **API Specification (JSON)**: `http://127.0.0.1:8000/spec`
+-   **API Specification (Markdown)**: `http://127.0.0.1:8000/spec/markdown`
 
-# Use token to call Gemini
-TOKEN=... # paste access_token from previous step
-curl -s -X POST http://127.0.0.1:8000/gemini/generate \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"prompt":"Hi there, I am here to talk."}'
-```
+### Module-Specific Pages
 
-## Product spec endpoints
-- JSON: `GET /spec`
-- Markdown: `GET /spec/markdown`
+Once logged in, you can access the individual assessment modules:
 
-## Idle auto-shutdown
-- The server exits if no requests are received for `IDLE_SHUTDOWN_SECONDS` (default 1200s).
+-   **Reading**: `/app/read/`
+-   **Listening**: `/app/listen/`
+-   **Writing**: `/app/write/`
+-   **Vocabulary**: `/app/vocabulary/`
+-   **Speaking**: `/app/speaking/`
+
+## ⚙️ How It Works
+
+The application is built around a modular FastAPI backend that serves a static frontend. Each language skill is handled by a dedicated router that contains the logic for the adaptive assessment.
+
+-   **Authentication**: A seed user is created from the `.env` file. You can log in with these credentials to receive a JWT access token, which must be included in the `Authorization` header for all protected API calls.
+-   **Adaptive Logic**: Each module starts at a default proficiency level (e.g., B1). Based on the user's answers, the backend logic adjusts the difficulty of the next set of questions up or down the CEFR scale (A1-C2).
+-   **Database**: User information and the results of each completed module session are stored in a local SQLite database file (`app.db`).
 
 ## Troubleshooting
-- `gemini_configured: false` on `/`: ensure `.env` is in project root and server started from the root (the provided `scripts/run.sh` already does this).
-- 401 from Gemini:
-  - AI Studio: verify `GEMINI_PROVIDER=ai_studio` and the key is a Studio key.
-  - Vertex: set `GEMINI_PROVIDER=vertex`, set `GEMINI_VERTEX_PROJECT`, enable Vertex AI API, and ensure the key is permitted for Vertex Express.
-- Login fails: confirm `SEED_USERNAME` / `SEED_PASSWORD` in `.env` and restart the server.
 
-## Project layout
-```
-backend/
-  app/
-    routers/
-      auth.py        # OAuth2 password flow, JWT
-      gemini.py      # Protected /gemini/generate
-      health.py      # /health
-      spec.py        # /spec, /spec/markdown
-    gemini_client.py # Vertex/AI Studio client wrapper
-    main.py          # FastAPI app, static mount, idle shutdown
-    settings.py      # Pydantic settings from .env
-frontend/
-  index.html         # Minimal UI (login + generate)
-scripts/
-  run.sh             # Launch Uvicorn with .venv
-requirements.txt
-.env                 # Your secrets (gitignored)
-```
+-   **`gemini_configured: false` on `/`**: This means the server could not load the Gemini API key from the `.env` file. Ensure the `.env` file exists in the project root and that you started the server from the root directory.
+-   **401 Unauthorized from Gemini API**:
+    -   If using **AI Studio**, ensure `GEMINI_PROVIDER` is set to `ai_studio` and you are using a valid AI Studio key.
+    -   If using **Vertex AI**, ensure `GEMINI_PROVIDER` is set to `vertex`, the `GEMINI_VERTEX_PROJECT` is correct, the Vertex AI API is enabled in your GCP project, and your API key is authorized for Vertex AI.
+-   **Login Fails**: Double-check the `SEED_USERNAME` and `SEED_PASSWORD` in your `.env` file and restart the server to apply the changes.
+
+## 📄 License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
