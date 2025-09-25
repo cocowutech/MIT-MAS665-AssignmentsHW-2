@@ -12,6 +12,7 @@
         input, textarea { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
         button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
         button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .hidden { display: none !important; }
         .row { display: flex; gap: 12px; align-items: center; }
         .row > * { flex: 1; }
         .small { color: #93c5fd; font-size: 12px; }
@@ -35,6 +36,19 @@
         let asrFinalText = '';
         let session = null;
         let nextPendingItem = null;
+        let micPermissionState = 'unknown';
+
+        function show(el) {
+            const node = typeof el === 'string' ? $(el) : el;
+            if (!node) return;
+            node.classList.remove('hidden');
+        }
+
+        function hide(el) {
+            const node = typeof el === 'string' ? $(el) : el;
+            if (!node) return;
+            node.classList.add('hidden');
+        }
 
         async function login(username, password){
             const form = new URLSearchParams();
@@ -51,6 +65,30 @@
             const r = await fetch('/speaking/start', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ start_level: 'A2' }) });
             if(!r.ok) throw new Error('start failed');
             return await r.json();
+        }
+
+        async function ensureMicrophonePermission(){
+            if (micPermissionState === 'granted') return true;
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                const status = document.getElementById('status');
+                if (status) status.textContent = 'Microphone not supported in this browser. Please try Chrome or Firefox.';
+                micPermissionState = 'unsupported';
+                return false;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                micPermissionState = 'granted';
+                return true;
+            } catch (err) {
+                micPermissionState = 'denied';
+                const status = document.getElementById('status');
+                if (status) {
+                    status.textContent = 'Please allow microphone access to continue.';
+                }
+                alert('Microphone permission is required. Please allow access when prompted and try again.');
+                return false;
+            }
         }
 
         function msToS(ms){ return Math.max(0, Math.ceil(ms/1000)); }
@@ -70,8 +108,8 @@
         async function startPrepAndRecord(prepSeconds, recordSeconds){
             $('prepTimer').textContent = prepSeconds;
             $('recordTimer').textContent = Math.min(recordSeconds, 60);
-            $('prep').style.display = 'block';
-            $('record').style.display = 'none';
+            show('prep');
+            hide('record');
             isRecording = false;
             hasRecordedThisItem = false;
             transcriptText = '';
@@ -123,16 +161,16 @@
 
         async function beginRecording(recordSeconds){
             console.log('beginRecording called');
-            $('prep').style.display = 'none';
-            $('record').style.display = 'block';
+            hide('prep');
+            show('record');
             $('recordBtn').textContent = 'Stop';
             $('recordBtn').disabled = false;
             isRecording = true;
-            const as = $('autostart'); if (as) as.style.display = 'none';
+            const as = $('autostart'); if (as) hide(as);
             transcriptText = '';
             asrFinalText = '';
             recordedChunks = [];
-            const subBtnHide = $('submitBtn'); if (subBtnHide) subBtnHide.style.display = 'none';
+            hide('submitBtn');
             try {
                 if (!window.MediaRecorder) {
                     throw new Error("Browser incompatibility: MediaRecorder not supported.");
@@ -156,8 +194,8 @@
                     recordedAudioBlob = blob; // Store the blob
                     $('audioPlayback').src = URL.createObjectURL(blob);
                     // Reveal Submit button after recording stops
-                    const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
-                    console.log('Submit button visibility:', sub ? sub.style.display : 'N/A');
+                    show('submitBtn');
+                    console.log('Submit button shown');
                 };
                 mediaRecorder.start();
                 console.log('mediaRecorder started');
@@ -204,8 +242,8 @@
             // Disable to prevent re-recording
             $('recordBtn').disabled = true;
             // Show Submit button; user must submit manually
-            const sub = $('submitBtn'); if (sub) sub.style.display = 'inline-block';
-            console.log('Submit button visibility (stopRecording):', sub ? sub.style.display : 'N/A');
+            show('submitBtn');
+            console.log('Submit button shown (stopRecording)');
         }
 
         function blobToBase64(blob) {
@@ -243,7 +281,7 @@
             if(hasRecordedThisItem) return;
             if(!isRecording){
                 if(countdownInterval) clearInterval(countdownInterval);
-                const as = $('autostart'); if (as) as.style.display = 'none';
+                const as = $('autostart'); if (as) hide(as);
                 beginRecording(parseInt($('recordTimer').textContent, 10) || 60);
             }else{
                 stopRecording();
@@ -251,15 +289,15 @@
         }
 
         function showRecordUI(recordSeconds){
-            $('prep').style.display = 'none';
-            $('record').style.display = 'block';
+            hide('prep');
+            show('record');
             $('recordBtn').textContent = 'Start';
             $('recordBtn').disabled = false;
-            const subBtn = $('submitBtn'); if (subBtn) subBtn.style.display = 'none';
+            hide('submitBtn');
             if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
             const as = $('autostart');
             if (as) {
-                as.style.display = 'block';
+                show(as);
                 as.innerHTML = 'Click <strong>Start</strong> when you are ready to record.';
             }
         }
@@ -298,11 +336,11 @@
             if(resp.finished){
                 $('prompt').textContent = 'Finished!';
                 $('guidance').textContent = '';
-                $('prep').style.display = 'none';
-                $('record').style.display = 'none';
-                const nxc = $('nextCard'); if (nxc) nxc.style.display = 'block';
-                const continueBtn = $('continueBtn'); if (continueBtn) continueBtn.style.display = 'none';
-                const finishBtnContainer = $('finishSessionBtnContainer'); if (finishBtnContainer) finishBtnContainer.style.display = 'block';
+                hide('prep');
+                hide('record');
+                show('nextCard');
+                hide('continueBtn');
+                show('finishSessionBtnContainer');
                 return;
             }
             // Hold the next item until user reviews feedback and clicks Continue
@@ -317,10 +355,10 @@
             if (reviewFeedback) reviewFeedback.textContent = resp.feedback || '';
             if (reviewPronunciationScore) reviewPronunciationScore.textContent = resp.pronunciation_score ? `Pronunciation Score: ${resp.pronunciation_score.toFixed(2)}%` : '';
             if (reviewPronunciationFeedback) reviewPronunciationFeedback.textContent = resp.pronunciation_feedback || '';
-            if (review) review.style.display = 'block';
-            $('prep').style.display = 'none';
-            $('record').style.display = 'none';
-            const nxc = $('nextCard'); if (nxc) nxc.style.display = 'block';
+            show(review);
+            hide('prep');
+            hide('record');
+            show('nextCard');
         }
 
         function updateAuthHeader(){
@@ -329,10 +367,10 @@
             if (!st) return;
             if (token) {
                 st.textContent = username ? `Logged in as ${username}` : 'Logged in';
-                if (link) link.style.display = 'none';
+                if (link) hide(link);
             } else {
                 st.textContent = 'Logged out';
-                if (link) link.style.display = 'inline';
+                if (link) show(link);
             }
         }
 
@@ -354,14 +392,14 @@
         window.addEventListener('DOMContentLoaded', async () => {
             const ok = await validateToken();
             if (ok) {
-                $('module').style.display = 'block';
+                show('module');
                 updateAuthHeader();
-                const lc = document.getElementById('login-card'); if (lc) lc.style.display = 'none';
+                const lc = document.getElementById('login-card'); if (lc) hide(lc);
             } else {
                 const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
                 if (st) { st.textContent = 'Logged out'; }
-                if (link) { link.style.display = 'inline'; }
-                const lc = document.getElementById('login-card'); if (lc) lc.style.display = 'block';
+                if (link) { show(link); }
+                const lc = document.getElementById('login-card'); if (lc) show(lc);
             }
             $('loginBtn').addEventListener('click', async () => {
                 $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
@@ -369,9 +407,9 @@
                     token = await login($('username').value, $('password').value);
                     username = $('username').value || null;
                     $('loginMsg').textContent = username ? `Logged in as ${username}` : 'Logged in';
-                    $('module').style.display = 'block';
+                    show('module');
                     updateAuthHeader();
-                    const lc = document.getElementById('login-card'); if (lc) lc.style.display = 'none';
+                    const lc = document.getElementById('login-card'); if (lc) hide(lc);
                 }catch(e){
                     $('loginMsg').textContent = 'Login failed';
                 }finally{
@@ -386,6 +424,11 @@
                     // revalidate token before starting
                     const ok = await validateToken();
                     if (!ok) throw new Error('Please log in');
+                    const micOk = await ensureMicrophonePermission();
+                    if (!micOk) {
+                        $('status').textContent = 'Microphone permission required.';
+                        return;
+                    }
                     session = await startSession();
                     sessionInitialized = true;
                     $('status').textContent = `Level: ${session.level} (${session.progress_current}/${session.progress_total})`;
@@ -396,12 +439,13 @@
                     $('pronunciationScore').textContent = '';
                     $('pronunciationFeedback').textContent = '';
                     $('recordBtn').onclick = toggleRecording;
-                    const sub = $('submitBtn'); if (sub) { sub.style.display = 'none'; sub.disabled = false; }
+                    hide('nextCard');
+                    const sub = $('submitBtn'); if (sub) { hide(sub); sub.disabled = false; }
                     await startPrepAndRecord(session.item.prep_seconds, session.item.record_seconds);
                     $('sessionId').value = session.session_id;
                     $('itemId').value = session.item.id;
-                    const continueBtn = $('continueBtn'); if (continueBtn) continueBtn.style.display = 'block';
-                    const finishBtnContainer = $('finishSessionBtnContainer'); if (finishBtnContainer) finishBtnContainer.style.display = 'none';
+                    const continueBtn = $('continueBtn'); if (continueBtn) show(continueBtn);
+                    const finishBtnContainer = $('finishSessionBtnContainer'); if (finishBtnContainer) hide(finishBtnContainer);
                 }catch(e){
                     console.error('Start session failed:', e);
                     if (String(e.message || e).includes('401')) {
@@ -410,8 +454,8 @@
                         token = null; username = null;
                         const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
                         if (st) { st.textContent = 'Logged out'; }
-                        if (link) { link.style.display = 'inline'; }
-                        const lc = document.getElementById('login-card'); if (lc) lc.style.display = 'block';
+                        if (link) { show(link); }
+                        const lc = document.getElementById('login-card'); if (lc) show(lc);
                         $('status').textContent = 'Please log in';
                     } else if (!sessionInitialized) {
                         $('status').textContent = 'Failed to start session';
@@ -453,9 +497,12 @@
                         $('audioPlayback').src = '';
                         $('sessionId').value = next.session_id;
                         $('itemId').value = item.id;
-                        const review = $('review'); if (review) review.style.display = 'none';
+                        hide('review');
+                        hide('nextCard');
+                        show('continueBtn');
+                        hide('finishSessionBtnContainer');
                         startPrepAndRecord(item.prep_seconds, item.record_seconds);
-                        const sub = $('submitBtn'); if (sub) { sub.style.display = 'none'; sub.disabled = false; }
+                        const sub = $('submitBtn'); if (sub) { hide(sub); sub.disabled = false; }
                     }catch(e){
                         alert(String(e.message || e));
                     }
@@ -491,7 +538,7 @@
             </div>
         </div>
 
-        <div id="module" class="card" style="display:none">
+        <div id="module" class="card hidden">
             <div class="row" style="justify-content: space-between;">
                 <div id="status" class="small">Not started</div>
                 <button id="startBtn">Start Session</button>
@@ -503,31 +550,34 @@
                 <div id="guidance" class="small" style="margin-top:8px"></div>
             </div>
 
-            <div id="prep" style="margin-top:12px; display:none">
+            <div id="prep" class="hidden" style="margin-top:12px;">
                 <div>Preparation… <span class="timer" id="prepTimer">30</span>s</div>
                 <div class="row" style="margin-top:8px">
                     <button id="skipPrepBtn">Skip to recording</button>
                 </div>
             </div>
 
-            <div id="record" style="margin-top:12px; display:none">
+            <div id="record" class="hidden" style="margin-top:12px;">
                 <div>Recording… <span class="timer" id="recordTimer">60</span>s</div>
-                <div id="autostart" class="small" style="margin-top:4px; display:none">Click <strong>Start</strong> when you are ready to record.</div>
+                <div id="autostart" class="small hidden" style="margin-top:4px;">Click <strong>Start</strong> when you are ready to record.</div>
                 <div id="asrWarning" class="small" style="margin-top:4px"></div>
                 <div class="row" style="margin-top:8px">
                     <button id="recordBtn">Start</button>
-                    <button id="submitBtn" style="display:none">Submit</button>
+                    <button id="submitBtn" class="hidden">Submit</button>
                 </div>
                 <audio id="audioPlayback" controls></audio>
                 <div class="small" style="margin-top:8px">Transcript</div>
-                <div id="transcript" class="small" style="min-height:20px; margin-top:4px"></div>
+                <div id="transcript" class="small" style="min-height:20px; margin-top:4px; white-space: pre-wrap; padding: 8px; background: #0a0f1f; border: 1px solid #1e2a55; border-radius: 8px;"></div>
                 <div class="small" style="margin-top:8px">Feedback</div>
                 <div id="feedback" class="small" style="min-height:20px; margin-top:4px"></div>
+                <div class="small" style="margin-top:8px">Pronunciation (auto)</div>
+                <div id="pronunciationScore" class="small" style="min-height:20px; margin-top:4px"></div>
+                <div id="pronunciationFeedback" class="small" style="min-height:20px; margin-top:4px"></div>
                 <input id="sessionId" type="hidden" />
                 <input id="itemId" type="hidden" />
             </div>
 
-            <div id="review" style="margin-top:12px; display:none">
+            <div id="review" class="hidden" style="margin-top:12px;">
                 <div class="small">Review</div>
                 <div id="reviewSummary" style="margin-top:6px"></div>
                 <div id="reviewFeedback" class="small" style="min-height:20px; margin-top:4px"></div>
@@ -537,11 +587,11 @@
                 <div id="reviewPronunciationFeedback" class="small" style="min-height:20px; margin-top:4px"></div>
             </div>
         </div>
-        <div class="card" id="nextCard" style="margin-top:12px; display:none">
+        <div class="card hidden" id="nextCard" style="margin-top:12px;">
             <div class="row" style="justify-content:flex-end">
                 <button id="continueBtn">Next Assignment</button>
             </div>
-            <div style="margin-top: 16px;" id="finishSessionBtnContainer" style="display:none;">
+            <div class="hidden" style="margin-top: 16px;" id="finishSessionBtnContainer">
                 <button onclick="window.location.href = '/app/';">Session finished — back to home</button>
             </div>
         </div>

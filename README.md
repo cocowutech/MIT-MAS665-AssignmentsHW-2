@@ -1,4 +1,5 @@
 # Adaptive English Placement Agent
+## Test me with Comet assistant :X
 
 FastAPI backend with a minimal web UI for login and a Gemini-powered test call. Includes product spec endpoints and idle auto-shutdown.
 
@@ -118,9 +119,9 @@ Visit:
 
 
 ## Login and talk
-Default seed user (from `.env`):
-- username: `rong_wu`
-- password: `mit!23456`
+Default seed user (from `.env`) - removed for now.
+- username: ``
+- password: ``
 
 ## Writing module
 

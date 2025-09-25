@@ -358,12 +358,18 @@ async def _assess_pronunciation(audio_base64: str, expected_transcript: str) -> 
 	"""Assess pronunciation using Google Cloud Speech-to-Text API.
 	Returns dict with keys: pronunciation_score, pronunciation_feedback.
 	"""
-	if not settings.gemini_vertex_project or not settings.gemini_vertex_region:
+	vertex_project = getattr(settings, "vertex_project", None)
+	vertex_region = getattr(settings, "vertex_region", None)
+	if not vertex_project or not vertex_region:
 		return {"pronunciation_score": None, "pronunciation_feedback": "Pronunciation assessment requires Vertex AI project and region settings."}
+	if not audio_base64:
+		return {"pronunciation_score": None, "pronunciation_feedback": "No audio provided for pronunciation analysis."}
 
 	client = speech.SpeechClient()
 
 	audio_content = base64.b64decode(audio_base64)
+	if not audio_content:
+		return {"pronunciation_score": None, "pronunciation_feedback": "Empty audio payload received."}
 
 	diarization_config = speech.SpeakerDiarizationConfig(
 		enable_speaker_diarization=False,
@@ -451,6 +457,7 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 	predicted_level: Optional[str] = None
 	pronunciation_score: Optional[float] = None
 	pronunciation_feedback: Optional[str] = None
+	audio_base64 = req.audio_base64 or ""
 
 	if transcript:
 		try:

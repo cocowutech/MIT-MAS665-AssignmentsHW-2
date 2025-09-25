@@ -165,7 +165,7 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
 	if existing:
 		raise HTTPException(status_code=409, detail="username already exists")
 	# Create user
-	limit = 10000 if username == "rong_wu" else 1000
+	limit = 1000000 if username == "rong_wu" else 1000
 	row = AuthUser(username=username, password_hash=pwd_context.hash(password), email=email, phone=phone, requests_limit=limit)
 	db.add(row)
 	db.commit()
