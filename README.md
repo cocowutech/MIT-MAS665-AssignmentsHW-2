@@ -32,8 +32,8 @@ GEMINI_VERTEX_REGION=us-central1
 GEMINI_VERTEX_PROJECT=YOUR_GCP_PROJECT_ID
 
 # Auth (seed user and JWT)
-SEED_USERNAME=rong_wu
-SEED_PASSWORD=mit!23456
+SEED_USERNAME=
+SEED_PASSWORD=
 JWT_SECRET_KEY=change-this-in-prod
 
 # Idle shutdown (seconds with no requests before exit)

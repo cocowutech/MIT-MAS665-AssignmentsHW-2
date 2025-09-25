@@ -51,7 +51,7 @@ GEMINI_PROVIDER=vertex            # Vertex AI Express (recommended for AQ.* keys
 
 # Vertex settings (only if using provider=vertex)
 GEMINI_VERTEX_REGION=us-central1
-GEMINI_VERTEX_PROJECT=YOUR_GCP_PROJECT_ID
+GEMINI_VERTEX_PROJECT=upbeat-legacy-472504-t5
 
 # Auth (seed user and JWT)
 SEED_USERNAME=rong_wu

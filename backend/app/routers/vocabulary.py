@@ -66,7 +66,6 @@ class AnswerResponse(BaseModel):
     progress_total: int
     finished: bool
     explanation: Optional[str] = None
-    question: Optional[Question] = None
 
 
 class _SessionState:
@@ -281,21 +280,9 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
     _adjust_level(state, was_correct)
 
     finished = state.asked >= state.total
-    next_question: Optional[Question] = None
     if not finished:
         # Preload questions for the new level in the background
         asyncio.create_task(_preload_questions(state, state.level_index))
-
-        # Try to get the next question from cache
-        async with state._cache_lock:
-            if state.level_index in state._question_cache and state._question_cache[state.level_index]:
-                next_question = state._question_cache[state.level_index].pop(0)
-        
-        # If not in cache, generate it
-        if not next_question:
-            next_question = await _generate_question_for(state.level_index)
-
-        state.questions[next_question.id] = next_question
         state.asked += 1
 
     response = AnswerResponse(
@@ -305,7 +292,6 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
         progress_total=state.total,
         finished=finished,
         explanation=q.rationale,
-        question=next_question,
     )
 
     # Cleanup session if finished
@@ -316,5 +302,38 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
             pass
 
     return response
+
+
+class NextQuestionRequest(BaseModel):
+    session_id: str
+
+
+class NextQuestionResponse(BaseModel):
+    question: Question
+
+
+@router.post("/next_question", response_model=NextQuestionResponse)
+async def next_question(req: NextQuestionRequest, user: User = Depends(get_current_user)):
+    state = _sessions.get(req.session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+
+    # Try to get the next question from cache
+    q: Optional[Question] = None
+    async with state._cache_lock:
+        if state.level_index in state._question_cache and state._question_cache[state.level_index]:
+            q = state._question_cache[state.level_index].pop(0)
+
+    # If not in cache, generate it
+    if not q:
+        q = await _generate_question_for(state.level_index)
+
+    state.questions[q.id] = q
+    # Do NOT increment state.asked here, as this is a pre-fetch. Increment happens on answer submission.
+
+    # Preload more questions in the background to keep the cache full
+    asyncio.create_task(_preload_questions(state, state.level_index))
+
+    return NextQuestionResponse(question=q)
 
 
