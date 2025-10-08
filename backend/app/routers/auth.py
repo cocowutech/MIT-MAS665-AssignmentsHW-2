@@ -37,7 +37,11 @@ def _ensure_seed_user() -> None:
 	username = settings.seed_username
 	password = settings.seed_password_plain
 	if username and password and username not in _users:
-		_users[username] = pwd_context.hash(password)
+		# Truncate password to 72 bytes for bcrypt compatibility
+		password_bytes = password.encode('utf-8')
+		if len(password_bytes) > 72:
+			password_bytes = password_bytes[:72]
+		_users[username] = pwd_context.hash(password_bytes.decode('utf-8', errors='ignore'))
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -45,6 +49,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
+	# Check for guest users (case-insensitive)
+	if username.lower() in ['guest', 'guests']:
+		return User(username=username.lower())
+	
 	# Try DB-backed users first
 	user_row = db.query(AuthUser).filter(AuthUser.username == username).first()
 	if user_row and verify_password(password, user_row.password_hash):
