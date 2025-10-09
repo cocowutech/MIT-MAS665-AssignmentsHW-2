@@ -48,10 +48,10 @@
     <!-- Module-specific CSS -->
     <link rel="stylesheet" href="styles.css">
     <!-- Shared JavaScript -->
-    <script src="../shared/js/auth.js?v=20251009"></script>
-    <script src="../shared/js/api.js?v=20251009"></script>
+    <script src="../shared/js/auth.js?v=20251025"></script>
+    <script src="../shared/js/api.js?v=20251025"></script>
     <!-- Module-specific JavaScript -->
-    <script src="speaking.js?v=20251009"></script>
+    <script src="speaking.js?v=20251025"></script>
     </head>
 <body>
     <div class="container">
@@ -155,7 +155,33 @@
                         <div id="transcript"></div>
                     </div>
                     
-                    <audio id="audioPlayback" controls class="hidden"></audio>
+                    <!-- Custom Audio Player -->
+                    <div id="audioPlayer" class="audio-player hidden">
+                        <div class="audio-player-header">
+                            <span>Your Recording</span>
+                        </div>
+                        <audio id="audioPlayback" preload="metadata"></audio>
+                        <div class="audio-controls">
+                            <button id="playBtn" class="audio-btn">
+                                <span>▶</span>
+                            </button>
+                            <button id="pauseBtn" class="audio-btn hidden">
+                                <span>⏸</span>
+                            </button>
+                            <button id="restartBtn" class="audio-btn">
+                                <span>⏮</span>
+                            </button>
+                            <div class="audio-progress">
+                                <div class="audio-progress-bar">
+                                    <div id="audioProgress" class="audio-progress-fill"></div>
+                                </div>
+                                <div class="audio-time">
+                                    <span id="currentTime">0:00</span>
+                                    <span id="duration">0:00</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="asrWarning" class="small" style="color: #fbbf24; margin-top: 8px;"></div>
@@ -169,7 +195,7 @@
 
         <!-- Hidden form for submission -->
         <div class="hidden">
-            <input id="itemId" type="hidden" />
+                <input id="itemId" type="hidden" />
             </div>
 
             <div id="review" class="hidden" style="margin-top:12px;">

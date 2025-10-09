@@ -35,7 +35,11 @@ class SpeakingModuleState {
         this.transcriptText = '';
         this.submitTriggered = false;
         this.asrFinalText = '';
-        this.session = null;
+        this.sessionId = null;
+        this.currentTask = null;
+        this.progressCurrent = 0;
+        this.progressTotal = 0;
+        this.level = 'A2';
         this.nextPendingItem = null;
         this.micPermissionState = 'unknown';
         this.initializeAuth();
@@ -74,7 +78,8 @@ class SpeakingModuleState {
      * Reset session state
      */
     resetSessionState() {
-        this.session = null;
+        this.sessionId = null;
+        this.currentTask = null;
         this.nextPendingItem = null;
         this.isRecording = false;
         this.hasRecordedThisItem = false;
@@ -190,7 +195,11 @@ async function login(username, password) {
 async function startSession() {
     try {
         const response = await APIUtils.SpeakingAPI.startSession('A2');
-        moduleState.session = response.session;
+        moduleState.sessionId = response.session_id;
+        moduleState.currentTask = response.item;
+        moduleState.progressCurrent = response.progress_current;
+        moduleState.progressTotal = response.progress_total;
+        moduleState.level = response.level;
         return response;
     }
     catch (error) {
@@ -221,10 +230,15 @@ async function submitAnswer(answer) {
  */
 async function getNextTask() {
     try {
-        const response = await APIUtils.SpeakingAPI.getNextTask();
-        if (response.session) {
-            moduleState.session = response.session;
+        if (!moduleState.sessionId) {
+            throw new Error('No active session');
         }
+        const response = await APIUtils.SpeakingAPI.getNextTask(moduleState.sessionId);
+        moduleState.sessionId = response.session_id;
+        moduleState.currentTask = response.item;
+        moduleState.progressCurrent = response.progress_current;
+        moduleState.progressTotal = response.progress_total;
+        moduleState.level = response.level;
         return response;
     }
     catch (error) {
@@ -319,6 +333,16 @@ async function beginRecording(recordSeconds) {
     console.log('beginRecording called');
     hide('prep');
     show('record');
+    // Update recording status
+    const recordingStatus = document.querySelector('.recording-status');
+    if (recordingStatus) {
+        recordingStatus.innerHTML = '<div class="recording-dot"></div><span>Recording...</span>';
+    }
+    // Hide audio player
+    const audioPlayer = APIUtils.$element('audioPlayer');
+    if (audioPlayer) {
+        audioPlayer.classList.add('hidden');
+    }
     const recordBtn = APIUtils.$element('recordBtn');
     if (recordBtn) {
         recordBtn.textContent = 'Stop';
@@ -394,6 +418,20 @@ function stopRecording() {
         clearInterval(moduleState.countdownInterval);
         moduleState.countdownInterval = null;
     }
+    // Update recording status
+    const recordingStatus = document.querySelector('.recording-status');
+    if (recordingStatus) {
+        recordingStatus.innerHTML = '<div class="recording-dot" style="background-color: #10b981;"></div><span>Recording Complete</span>';
+    }
+    // Enable custom audio player
+    const audioPlayer = APIUtils.$element('audioPlayer');
+    const audioPlayback = APIUtils.$element('audioPlayback');
+    if (audioPlayer && audioPlayback && moduleState.recordedAudioBlob) {
+        const audioUrl = URL.createObjectURL(moduleState.recordedAudioBlob);
+        audioPlayback.src = audioUrl;
+        audioPlayer.classList.remove('hidden');
+        setupAudioPlayer(audioPlayback);
+    }
     const recordBtn = APIUtils.$element('recordBtn');
     if (recordBtn) {
         recordBtn.textContent = 'Submit';
@@ -401,8 +439,191 @@ function stopRecording() {
     }
 }
 // ============================================================================
+// AUDIO PLAYER FUNCTIONS
+// ============================================================================
+/**
+ * Setup custom audio player controls
+ * @param audioElement - HTML audio element
+ */
+function setupAudioPlayer(audioElement) {
+    const playBtn = APIUtils.$element('playBtn');
+    const pauseBtn = APIUtils.$element('pauseBtn');
+    const restartBtn = APIUtils.$element('restartBtn');
+    const audioProgress = APIUtils.$element('audioProgress');
+    const currentTimeEl = APIUtils.$element('currentTime');
+    const durationEl = APIUtils.$element('duration');
+    const progressBar = document.querySelector('.audio-progress-bar');
+    if (!playBtn || !pauseBtn || !restartBtn || !audioProgress || !currentTimeEl || !durationEl || !progressBar) {
+        return;
+    }
+    // Update duration when metadata loads
+    audioElement.addEventListener('loadedmetadata', () => {
+        durationEl.textContent = formatTime(audioElement.duration);
+    });
+    // Update progress during playback
+    audioElement.addEventListener('timeupdate', () => {
+        const progress = (audioElement.currentTime / audioElement.duration) * 100;
+        audioProgress.style.width = `${progress}%`;
+        currentTimeEl.textContent = formatTime(audioElement.currentTime);
+    });
+    // Handle play/pause
+    audioElement.addEventListener('play', () => {
+        playBtn.classList.add('hidden');
+        pauseBtn.classList.remove('hidden');
+    });
+    audioElement.addEventListener('pause', () => {
+        playBtn.classList.remove('hidden');
+        pauseBtn.classList.add('hidden');
+    });
+    // Play button
+    playBtn.addEventListener('click', () => {
+        audioElement.play();
+    });
+    // Pause button
+    pauseBtn.addEventListener('click', () => {
+        audioElement.pause();
+    });
+    // Restart button
+    restartBtn.addEventListener('click', () => {
+        audioElement.currentTime = 0;
+        audioElement.play();
+    });
+    // Progress bar click
+    progressBar.addEventListener('click', (e) => {
+        const rect = progressBar.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const width = rect.width;
+        const percentage = clickX / width;
+        audioElement.currentTime = percentage * audioElement.duration;
+    });
+}
+/**
+ * Format time in MM:SS format
+ * @param seconds - Time in seconds
+ * @returns Formatted time string
+ */
+function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+// ============================================================================
+// LLM SCORING FUNCTIONS
+// ============================================================================
+/**
+ * Get LLM-based score for the speaking response
+ * @param transcript - Speech transcript
+ * @param prompt - Original prompt
+ * @param guidance - Guidance for the task
+ * @returns Promise with score and feedback
+ */
+async function getLLMScore(transcript, prompt, guidance) {
+    try {
+        // For now, return a mock score based on transcript length and content
+        // In a real implementation, this would call an LLM API
+        const score = calculateMockScore(transcript, prompt);
+        const feedback = generateMockFeedback(transcript, prompt, guidance);
+        const level = determineLevel(score);
+        return { score, feedback, level };
+    }
+    catch (error) {
+        console.error('LLM scoring failed:', error);
+        return { score: 0, feedback: 'Scoring unavailable', level: 'A1' };
+    }
+}
+/**
+ * Calculate mock score based on transcript analysis
+ * @param transcript - Speech transcript
+ * @param prompt - Original prompt
+ * @returns Score from 0-100
+ */
+function calculateMockScore(transcript, prompt) {
+    if (!transcript || transcript.trim().length === 0) {
+        return 0;
+    }
+    let score = 0;
+    const words = transcript.trim().split(/\s+/).length;
+    // Base score for having content
+    score += Math.min(words * 2, 40);
+    // Bonus for answering the prompt
+    const promptWords = prompt.toLowerCase().split(/\s+/);
+    const transcriptLower = transcript.toLowerCase();
+    const answeredPrompt = promptWords.some(word => word.length > 3 && transcriptLower.includes(word));
+    if (answeredPrompt) {
+        score += 30;
+    }
+    // Bonus for length (encouraging detailed responses)
+    if (words >= 20)
+        score += 20;
+    else if (words >= 10)
+        score += 10;
+    // Bonus for coherence (simple check for sentence structure)
+    const sentences = transcript.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    if (sentences.length >= 2)
+        score += 10;
+    return Math.min(score, 100);
+}
+/**
+ * Generate mock feedback based on transcript analysis
+ * @param transcript - Speech transcript
+ * @param prompt - Original prompt
+ * @param guidance - Guidance for the task
+ * @returns Feedback string
+ */
+function generateMockFeedback(transcript, prompt, guidance) {
+    const words = transcript.trim().split(/\s+/).length;
+    if (words === 0) {
+        return "No speech detected. Please try speaking louder and closer to the microphone.";
+    }
+    if (words < 5) {
+        return "Your response was very short. Try to provide more details and examples.";
+    }
+    if (words < 15) {
+        return "Good start! Your response could be more detailed. Consider adding more examples or explanations.";
+    }
+    if (words >= 15) {
+        return "Excellent! You provided a detailed response with good vocabulary and structure.";
+    }
+    return "Thank you for your response. Keep practicing to improve your speaking skills.";
+}
+/**
+ * Determine CEFR level based on score
+ * @param score - Score from 0-100
+ * @returns CEFR level
+ */
+function determineLevel(score) {
+    if (score >= 80)
+        return 'B2';
+    if (score >= 60)
+        return 'B1';
+    if (score >= 40)
+        return 'A2';
+    if (score >= 20)
+        return 'A1';
+    return 'A1';
+}
+// ============================================================================
 // UI STATE MANAGEMENT FUNCTIONS
 // ============================================================================
+/**
+ * Display the current speaking task prompt and instructions
+ */
+function displayCurrentTask() {
+    if (!moduleState.currentTask)
+        return;
+    const promptText = APIUtils.$element('promptText');
+    const promptInstructions = APIUtils.$element('promptInstructions');
+    const taskProgress = APIUtils.$element('taskProgress');
+    if (promptText) {
+        promptText.textContent = moduleState.currentTask.prompt;
+    }
+    if (promptInstructions) {
+        promptInstructions.textContent = moduleState.currentTask.guidance;
+    }
+    if (taskProgress) {
+        taskProgress.textContent = `${moduleState.progressCurrent}/${moduleState.progressTotal}`;
+    }
+}
 /**
  * Start preparation phase with countdown timer
  * Manages UI state transitions between prep and recording phases
@@ -410,6 +631,8 @@ function stopRecording() {
  * @param recordSeconds - Recording time limit in seconds
  */
 async function startPrepAndRecord(prepSeconds, recordSeconds) {
+    // Display the current task prompt and instructions
+    displayCurrentTask();
     const prepTimer = APIUtils.$element('prepTimer');
     const recordTimer = APIUtils.$element('recordTimer');
     if (prepTimer)
@@ -486,7 +709,7 @@ function showRecordUI(recordSeconds) {
  * Handles audio encoding and API submission
  */
 async function submitRecording() {
-    if (moduleState.submitTriggered || !moduleState.recordedAudioBlob || !moduleState.session) {
+    if (moduleState.submitTriggered || !moduleState.recordedAudioBlob || !moduleState.sessionId) {
         return;
     }
     moduleState.submitTriggered = true;
@@ -501,23 +724,34 @@ async function submitRecording() {
         const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
         // Prepare answer data
         const answer = {
-            audio_data: base64Audio,
+            session_id: moduleState.sessionId || '',
+            item_id: moduleState.currentTask?.id || '',
             transcript: cleanTranscript(moduleState.transcriptText),
-            task_id: moduleState.session.current_task.id
+            audio_data: base64Audio
         };
         // Submit for evaluation
         const evaluation = await submitAnswer(answer);
+        // Get LLM-based score and feedback
+        const llmScore = await getLLMScore(cleanTranscript(moduleState.transcriptText), moduleState.currentTask?.prompt || '', moduleState.currentTask?.guidance || '');
+        // Combine backend evaluation with LLM scoring
+        const combinedEvaluation = {
+            ...evaluation,
+            llm_score: llmScore.score,
+            llm_feedback: llmScore.feedback,
+            llm_level: llmScore.level
+        };
         // Display results
-        displayEvaluationResults(evaluation);
+        displayEvaluationResults(combinedEvaluation);
         // Get next task
         const nextResponse = await getNextTask();
-        if (nextResponse.finished) {
-            showSessionComplete(nextResponse.final_score || 0);
+        // Check if session is complete (progress_current >= progress_total)
+        if (moduleState.progressCurrent >= moduleState.progressTotal) {
+            showSessionComplete(0); // TODO: Calculate final score
         }
         else {
             // Continue to next task
             setTimeout(() => {
-                startPrepAndRecord(nextResponse.session.current_task.prep_time, nextResponse.session.current_task.record_time);
+                startPrepAndRecord(nextResponse.item.prep_seconds, nextResponse.item.record_seconds);
             }, 3000);
         }
     }
@@ -541,12 +775,35 @@ function displayEvaluationResults(evaluation) {
     const resultsDiv = APIUtils.$element('results');
     if (!resultsDiv)
         return;
+    // Check if LLM scoring is available
+    const hasLLMScore = evaluation.llm_score !== undefined;
+    const llmScore = hasLLMScore ? evaluation.llm_score : 0;
+    const llmFeedback = hasLLMScore ? evaluation.llm_feedback : 'LLM scoring unavailable';
+    const llmLevel = hasLLMScore ? evaluation.llm_level : 'N/A';
     resultsDiv.innerHTML = `
         <div class="evaluation-results">
             <div class="evaluation-header">
                 <h3 class="evaluation-title">Evaluation Results</h3>
                 <div class="evaluation-score">${evaluation.score}/100</div>
             </div>
+            
+            ${hasLLMScore ? `
+            <div class="llm-scoring-section">
+                <div class="llm-score-header">
+                    <h4>AI Assessment</h4>
+                    <div class="llm-score">${llmScore}/100</div>
+                </div>
+                <div class="llm-level">
+                    <span class="level-label">CEFR Level:</span>
+                    <span class="level-badge">${llmLevel}</span>
+                </div>
+                <div class="llm-feedback">
+                    <div class="feedback-label">Feedback:</div>
+                    <div class="feedback-text">${llmFeedback}</div>
+                </div>
+            </div>
+            ` : ''}
+            
             <div class="evaluation-breakdown">
                 <div class="evaluation-item">
                     <div class="evaluation-item-label">Pronunciation</div>
@@ -662,7 +919,7 @@ async function handleStartSession() {
         hide('startBtn');
         show('taskInterface');
         // Start first task
-        startPrepAndRecord(response.session.current_task.prep_time, response.session.current_task.record_time);
+        startPrepAndRecord(response.item.prep_seconds, response.item.record_seconds);
     }
     catch (error) {
         console.error('Start session failed:', error);
@@ -719,6 +976,9 @@ window.SpeakingModule = {
     submitRecording,
     displayEvaluationResults,
     showSessionComplete,
+    displayCurrentTask,
+    setupAudioPlayer,
+    getLLMScore,
     moduleState
 };
 // Initialize when DOM is loaded

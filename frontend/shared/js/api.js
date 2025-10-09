@@ -197,10 +197,11 @@ const SpeakingAPI = {
 
     /**
      * Get next task in current session
+     * @param {string} sessionId - Session ID
      * @returns {Promise<Object>} Next task or session completion status
      */
-    async getNextTask() {
-        return apiClient.post('/speaking/next');
+    async getNextTask(sessionId) {
+        return apiClient.post('/speaking/next', { session_id: sessionId });
     }
 };
 
