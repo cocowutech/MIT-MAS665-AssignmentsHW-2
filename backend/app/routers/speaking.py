@@ -1,3 +1,27 @@
+"""Speaking Assessment Module
+
+This module provides adaptive speaking assessment functionality for the English
+placement test. It generates speaking tasks at appropriate CEFR levels, evaluates
+student responses using LLM-based assessment, and adjusts difficulty dynamically.
+
+Key Features:
+- Adaptive difficulty adjustment based on performance
+- LLM-powered evaluation with heuristic fallback
+- Pronunciation assessment using Google Cloud Speech-to-Text
+- Cambridge exam alignment (KET/PET/FCE)
+- Session management with progress tracking
+
+The module uses a hybrid approach combining:
+1. LLM-based evaluation for sophisticated assessment
+2. Heuristic analysis as fallback for reliability
+3. Pronunciation scoring via speech recognition confidence
+
+API Endpoints:
+- POST /speaking/start: Begin new assessment session
+- POST /speaking/answer: Submit speaking response for evaluation
+- POST /speaking/next: Get next task in current session
+"""
+
 from __future__ import annotations
 
 import base64
@@ -24,7 +48,14 @@ LEVELS: List[str] = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
 
 def level_to_exam(level: str) -> str:
-	# Map CEFR to Cambridge target focus (KET/PET/FCE). For C1/C2, use FCE-style targets.
+	"""Map CEFR levels to Cambridge exam targets.
+	
+	Args:
+		level: CEFR level (A1, A2, B1, B2, C1, C2)
+		
+	Returns:
+		Cambridge exam target: "KET" for A1/A2, "PET" for B1, "FCE" for B2/C1/C2
+	"""
 	if level in ("A1", "A2"):
 		return "KET"
 	if level == "B1":
@@ -78,6 +109,22 @@ class AnswerResponse(BaseModel):
 
 
 class _SessionState:
+	"""Internal session state for tracking speaking assessment progress.
+	
+	Manages the adaptive assessment session including current difficulty level,
+	progress tracking, and performance history. Used internally by the speaking
+	module to maintain session state between API calls.
+	
+	Attributes:
+		session_id: Unique identifier for the session
+		level_index: Current CEFR level index (0=A1, 1=A2, etc.)
+		correct_streak: Legacy field for consecutive correct answers (unused)
+		incorrect_streak: Legacy field for consecutive incorrect answers (unused)
+		asked: Number of tasks completed in this session
+		total: Total number of tasks in the session (default: 8)
+		items: Dictionary mapping item IDs to SpeakingItem objects
+		history: List of completed task assessments for analysis
+	"""
 	def __init__(self, level_index: int, total: int = 8) -> None:
 		self.session_id: str = uuid.uuid4().hex
 		self.level_index: int = level_index
@@ -93,6 +140,20 @@ _sessions: Dict[str, _SessionState] = {}
 
 
 def _extract_json_block(text: str) -> Dict[str, Any]:
+	"""Extract JSON object from LLM response text.
+	
+	Attempts to parse the entire text as JSON first, then searches for the first
+	JSON object using regex if direct parsing fails.
+	
+	Args:
+		text: Raw text response from LLM that should contain JSON
+		
+	Returns:
+		Parsed JSON object as dictionary
+		
+	Raises:
+		ValueError: If no valid JSON can be extracted from the text
+	"""
 	try:
 		return json.loads(text)
 	except Exception:
@@ -109,7 +170,17 @@ def _extract_json_block(text: str) -> Dict[str, Any]:
 
 
 def _dedupe_transcript(text: str) -> str:
-	"""Collapse repeated 1–3 word phrases and extra whitespace in transcript."""
+	"""Collapse repeated 1–3 word phrases and extra whitespace in transcript.
+	
+	Speech recognition often produces repeated phrases due to interim/final result overlap.
+	This function removes duplicate words and phrases to clean up the transcript.
+	
+	Args:
+		text: Raw transcript text that may contain repeated phrases
+		
+	Returns:
+		Cleaned transcript with duplicates removed and normalized whitespace
+	"""
 	s = re.sub(r"\s+", " ", text or "").strip()
 	if not s:
 		return s
@@ -125,7 +196,18 @@ def _dedupe_transcript(text: str) -> str:
 
 def _heuristic_estimate_level(transcript: str) -> Dict[str, str]:
 	"""Lightweight CEFR estimator (A1–C2) when LLM is unavailable.
-	Returns dict with keys: predicted_level, feedback.
+	
+	Uses linguistic features like vocabulary complexity, grammar structures, and
+	discourse markers to estimate the speaker's CEFR level. This serves as a
+	fallback when the LLM-based assessment fails.
+	
+	Args:
+		transcript: Cleaned transcript text to analyze
+		
+	Returns:
+		Dictionary with keys:
+		- predicted_level: CEFR level (A1, A2, B1, B2, C1, C2)
+		- feedback: Constructive advice for improvement
 	"""
 	text = (transcript or "").strip()
 	if not text:
@@ -219,6 +301,17 @@ def _heuristic_estimate_level(transcript: str) -> Dict[str, str]:
 
 
 def _build_prompt_for(level: str) -> str:
+	"""Build LLM prompt for generating speaking tasks at a specific CEFR level.
+	
+	Creates a structured prompt that instructs the LLM to generate appropriate
+	speaking tasks aligned with Cambridge exam standards for the given level.
+	
+	Args:
+		level: Target CEFR level (A1, A2, B1, B2, C1, C2)
+		
+	Returns:
+		Formatted prompt string for the LLM
+	"""
 	exam = level_to_exam(level)
 	return f"""
 You are an ESL speaking task writer.
@@ -242,6 +335,20 @@ Return STRICT JSON only, no markdown, following exactly this schema:
 
 
 async def _generate_item_for(level_index: int) -> SpeakingItem:
+	"""Generate a speaking task item for the given CEFR level.
+	
+	Uses the LLM to create an appropriate speaking prompt, preparation time,
+	and recording time based on the target CEFR level and Cambridge exam standards.
+	
+	Args:
+		level_index: Index into LEVELS array (0=A1, 1=A2, etc.)
+		
+	Returns:
+		SpeakingItem with generated prompt, timing, and guidance
+		
+	Raises:
+		HTTPException: If LLM fails to generate a valid prompt
+	"""
 	level = LEVELS[level_index]
 	client_model = "gemini-2.5-flash-lite"
 	# Allow env override but default to 2.5 flash-lite per user request
@@ -276,7 +383,16 @@ async def _generate_item_for(level_index: int) -> SpeakingItem:
 
 
 def _adjust_level(state: _SessionState, was_correct: bool) -> None:
-	# Legacy streak-based adjustment (unused now but kept for compatibility)
+	"""Legacy streak-based level adjustment (unused but kept for compatibility).
+	
+	This function implements the old adaptive algorithm that adjusts difficulty
+	based on consecutive correct/incorrect answers. It's no longer used in
+	favor of the LLM-based assessment in _adjust_level_direct().
+	
+	Args:
+		state: Current session state containing level and streaks
+		was_correct: Whether the last answer was correct
+	"""
 	if was_correct:
 		state.correct_streak += 1
 		state.incorrect_streak = 0
@@ -296,8 +412,21 @@ def _adjust_level(state: _SessionState, was_correct: bool) -> None:
 
 
 async def _evaluate_transcript(level: str, prompt_text: str, transcript: str) -> Dict[str, Any]:
-	"""Ask LLM to assess CEFR A1–C2, and also give relative grade vs target level.
-	Returns dict with keys: grade (better|equal|worse), feedback, predicted_level (A1–C2 or None).
+	"""Use LLM to assess student's CEFR level and performance relative to target.
+	
+	Evaluates the student's speaking performance using the LLM as an expert ESL examiner.
+	Considers task achievement, grammar/vocabulary range, coherence, and fluency.
+	
+	Args:
+		level: Target CEFR level for the task (A1, A2, B1, B2, C1, C2)
+		prompt_text: The original speaking prompt given to the student
+		transcript: Cleaned transcript of the student's response
+		
+	Returns:
+		Dictionary with keys:
+		- grade: "better", "equal", or "worse" relative to target level
+		- feedback: Constructive feedback for improvement
+		- predicted_level: Estimated CEFR level (A1-C2) or None if unclear
 	"""
 	client_model = "gemini-2.5-flash-lite"
 	model = settings.gemini_model_listen or client_model
@@ -348,6 +477,15 @@ Return STRICT JSON only:
 	return {"grade": grade, "feedback": feedback, "predicted_level": predicted}
 
 def _adjust_level_direct(state: _SessionState, grade: str) -> None:
+	"""Adjust difficulty level based on LLM assessment grade.
+	
+	Increases difficulty if performance is "better" than target, decreases if "worse".
+	This is the current adaptive algorithm that replaces the legacy streak-based approach.
+	
+	Args:
+		state: Current session state containing level index
+		grade: Assessment grade ("better", "equal", or "worse")
+	"""
 	if grade == "better" and state.level_index < len(LEVELS) - 1:
 		state.level_index += 1
 	elif grade == "worse" and state.level_index > 0:
@@ -356,7 +494,18 @@ def _adjust_level_direct(state: _SessionState, grade: str) -> None:
 
 async def _assess_pronunciation(audio_base64: str, expected_transcript: str) -> Dict[str, Any]:
 	"""Assess pronunciation using Google Cloud Speech-to-Text API.
-	Returns dict with keys: pronunciation_score, pronunciation_feedback.
+	
+	Analyzes the audio recording to provide pronunciation feedback and scoring.
+	Currently uses speech recognition confidence as a proxy for pronunciation quality.
+	
+	Args:
+		audio_base64: Base64-encoded audio data
+		expected_transcript: Expected transcript for comparison (currently unused)
+		
+	Returns:
+		Dictionary with keys:
+		- pronunciation_score: Confidence score (0-100) or None if unavailable
+		- pronunciation_feedback: Feedback message or error description
 	"""
 	vertex_project = getattr(settings, "vertex_project", None)
 	vertex_region = getattr(settings, "vertex_region", None)
@@ -421,6 +570,22 @@ async def _assess_pronunciation(audio_base64: str, expected_transcript: str) -> 
 
 @router.post("/start", response_model=StartResponse)
 async def start(req: StartRequest, user: User = Depends(get_current_user)):
+	"""Start a new speaking assessment session.
+	
+	Creates a new session with the specified starting level and generates the first
+	speaking task. The session will contain 8 total speaking tasks with adaptive
+	difficulty adjustment based on performance.
+	
+	Args:
+		req: Request containing optional start_level (defaults to A2)
+		user: Authenticated user (from JWT token)
+		
+	Returns:
+		StartResponse with session details and first speaking task
+		
+	Raises:
+		HTTPException: If start_level is invalid or session creation fails
+	"""
 	# Force default start at A2 if not provided
 	level = (req.start_level or "A2").upper()
 	if level not in LEVELS:
@@ -444,6 +609,22 @@ async def start(req: StartRequest, user: User = Depends(get_current_user)):
 
 @router.post("/answer", response_model=AnswerResponse)
 async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
+	"""Submit a speaking task answer for assessment.
+	
+	Processes the student's transcript and optional audio recording to provide
+	assessment feedback, pronunciation scoring, and adaptive level adjustment.
+	Uses LLM-based evaluation with heuristic fallback for reliability.
+	
+	Args:
+		req: Answer request containing session_id, item_id, transcript, and optional audio
+		user: Authenticated user (from JWT token)
+		
+	Returns:
+		AnswerResponse with assessment results, feedback, and next task (if available)
+		
+	Raises:
+		HTTPException: If session/item not found or assessment fails
+	"""
 	state = _sessions.get(req.session_id)
 	if not state:
 		raise HTTPException(status_code=404, detail="Session not found or expired")
@@ -546,6 +727,21 @@ class NextRequest(BaseModel):
 
 @router.post("/next", response_model=StartResponse)
 async def next_item(req: NextRequest, user: User = Depends(get_current_user)):
+	"""Get the next speaking task in the current session.
+	
+	Generates and returns the next speaking task based on the current adaptive
+	level. The difficulty may have been adjusted based on previous performance.
+	
+	Args:
+		req: Request containing session_id
+		user: Authenticated user (from JWT token)
+		
+	Returns:
+		StartResponse with the next speaking task and updated progress
+		
+	Raises:
+		HTTPException: If session not found, expired, or already finished
+	"""
 	state = _sessions.get(req.session_id)
 	if not state:
 		raise HTTPException(status_code=404, detail="Session not found or expired")
