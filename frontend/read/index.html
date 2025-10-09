@@ -4,346 +4,134 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Adaptive Reading</title>
-    <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
-        .container { max-width: 880px; margin: 0 auto; padding: 24px; }
-        .card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 20px; margin-top: 16px; }
-        label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c7d2fe; }
-        input, select, textarea { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
-        button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .row { display: flex; gap: 12px; align-items: center; }
-        .row > * { flex: 1; }
-        .header { display: flex; justify-content: space-between; align-items: center; }
-        .small { color: #93c5fd; font-size: 12px; }
-        pre { white-space: pre-wrap; word-break: break-word; background: #0a0f1f; border: 1px solid #1e2a55; padding: 12px; border-radius: 8px; }
-        .choices { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
-        .choice { background: #0f172a; border: 1px solid #334155; padding: 10px; border-radius: 8px; cursor: pointer; }
-        .choice.correct { border-color: #10b981; }
-        .choice.incorrect { border-color: #ef4444; }
-        a { color: #93c5fd; }
-    </style>
- </head>
- <body>
-   <div class="container">
-    <div class="header">
-      <h2>Adaptive Reading Module</h2>
-      <div class="small"><a href="/app" class="small">Home</a> · <span id="authState">Logged out</span> <a href="/app" id="loginLink" class="small">Login</a></div>
+    <!--
+    READING MODULE FRONTEND DOCUMENTATION
+    =====================================
+    
+    This file implements the frontend interface for the adaptive reading assessment module.
+    It provides a complete reading evaluation system with passages, multiple choice questions,
+    and real-time feedback integration with the backend API.
+    
+    BACKEND API INTEGRATION:
+    - POST /auth/token: User authentication
+    - POST /read/start: Initialize new reading session
+    - POST /read/answer: Submit reading answer for evaluation
+    - POST /read/next: Get next question in current session
+    - GET /auth/me: Validate current user token
+    
+    KEY FEATURES:
+    - Adaptive difficulty progression based on performance
+    - Multiple choice questions with immediate feedback
+    - Reading comprehension assessment
+    - Session management with progress tracking
+    - Guest user support for testing
+    
+    BROWSER COMPATIBILITY:
+    - Modern browsers with ES2020 support
+    - Responsive design for mobile and desktop
+    
+    WORKFLOW:
+    1. User logs in (guest/any for testing)
+    2. Starts reading session with initial CEFR level
+    3. Reads passage and answers multiple choice questions
+    4. Receives immediate feedback and adaptive level adjustment
+    5. Continues to next question or finishes session
+    -->
+    
+    <!-- Shared CSS -->
+    <link rel="stylesheet" href="../shared/css/base.css">
+    <link rel="stylesheet" href="../shared/css/components.css">
+    <!-- Module-specific CSS -->
+    <link rel="stylesheet" href="styles.css">
+    <!-- Shared JavaScript -->
+    <script src="../shared/js/auth.js?v=20251009"></script>
+    <script src="../shared/js/api.js?v=20251009"></script>
+    <!-- Module-specific JavaScript -->
+    <script src="read.js?v=20251009"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header with navigation and auth state -->
+        <div class="header">
+            <h1>Adaptive Reading Module</h1>
+            <div class="small">
+                <a href="/app">Home</a> · 
+                <span id="authState">Logged out</span> 
+                <a href="/app" id="loginLink">Login</a>
+            </div>
+        </div>
+
+        <!-- Back navigation card -->
+        <div class="card">
+            <button onclick="window.location.href = '/app/';">← Back</button>
+        </div>
+
+        <div id="status" class="small"></div>
+
+        <!-- Login Form -->
+        <div id="login-card" class="card">
+            <h2>Login</h2>
+            <form id="loginForm">
+                <div class="row">
+                    <div>
+                        <label for="username">Username</label>
+                        <input id="username" type="text" placeholder="username" value="guest" required>
+                    </div>
+                    <div>
+                        <label for="password">Password</label>
+                        <input id="password" type="password" placeholder="password" value="any" required>
+                    </div>
+                </div>
+                <div style="margin-top:12px">
+                    <button type="submit">Login</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Main Interface -->
+        <div id="session-card" class="hidden">
+            <div class="card">
+                <h2>Reading Assessment</h2>
+                <p>This assessment will evaluate your reading comprehension skills through various passages and questions.</p>
+                <p>You will read passages and answer multiple choice questions. The difficulty will adjust based on your performance.</p>
+                
+                <div class="reading-level">
+                    <span>Starting Level:</span>
+                    <span class="level-badge">A2</span>
+                </div>
+                
+                <button id="startBtn">Start Reading Assessment</button>
+            </div>
+        </div>
+
+        <!-- Assessment Interface -->
+        <div id="assessment-interface" class="hidden">
+            <!-- Progress Display -->
+            <div id="progress" class="hidden">
+                <!-- Progress will be populated by JavaScript -->
+            </div>
+
+            <!-- Reading Passage -->
+            <div id="passage" class="hidden">
+                <!-- Passage will be populated by JavaScript -->
+            </div>
+
+            <!-- Reading Question -->
+            <div id="question" class="hidden">
+                <!-- Question will be populated by JavaScript -->
+            </div>
+
+            <!-- Submit Button -->
+            <div class="card">
+                <button id="submitBtn" disabled>Submit Answer</button>
+            </div>
+        </div>
+
+        <!-- Results Display -->
+        <div id="results" class="hidden">
+            <!-- Results will be populated by JavaScript -->
+        </div>
+
     </div>
-    <div class="card">
-      <button onclick="window.location.href = '/app/';">← Back</button>
-    </div>
-
-     <div class="card" id="login-card">
-       <h3>Login</h3>
-       <div class="row">
-         <div>
-           <label>Username</label>
-           <input id="username" placeholder="username" value="guest" />
-         </div>
-         <div>
-           <label>Password</label>
-           <input id="password" type="password" placeholder="password" value="any" />
-         </div>
-       </div>
-       <div style="margin-top:12px">
-         <button id="loginBtn">Login</button>
-         <span id="loginMsg" class="small" style="margin-left:8px"></span>
-       </div>
-     </div>
-
-     <div class="card" id="start-card" style="display:none">
-       <h3>Start Session</h3>
-       <div class="row">
-         <div class="small">Starting at CEFR A2 (KET). Difficulty adapts based on your answers.</div>
-         <div style="align-self:flex-end">
-           <button id="startBtn">Start</button>
-         </div>
-       </div>
-       <div id="startMsg" class="small"></div>
-     </div>
-
-     <div class="card" id="passage-card" style="display:none">
-       <h3>Passage</h3>
-       <pre id="passage"></pre>
-       <div class="small" id="levelInfo"></div>
-     </div>
-
-     <div class="card" id="question-card" style="display:none">
-       <div class="row" style="justify-content:space-between">
-         <div><h3 id="qHeader">Question</h3></div>
-         <div class="small" id="qMeta"></div>
-       </div>
-       <div id="qText"></div>
-       <div class="choices" id="choices"></div>
-       <div id="feedback" class="small" style="margin-top:8px"></div>
-       <div style="margin-top: 12px;">
-         <button id="nextQuestionBtn" style="display:none;" onclick="loadNextQuestion()">Next</button>
-         <button id="retrySubmitBtn" style="display:none;" onclick="retrySubmit()">Retry</button>
-       </div>
-     </div>
-
-     <div class="card" id="finish-card" style="display:none">
-       <h3>Finished</h3>
-       <div id="summary"></div>
-       <div style="margin-top: 16px;">
-         <button onclick="window.location.href = '/app/';">Session finished — back to home</button>
-       </div>
-     </div>
-   </div>
-
-  <script>
-   const $ = (id) => document.getElementById(id);
-  let token = localStorage.getItem('token');
-  let username = localStorage.getItem('username');
-
-  async function validateToken(){
-    if (!token) return false;
-    try {
-      const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
-      if (!r.ok) throw new Error('invalid');
-      const u = await r.json().catch(() => null);
-      if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
-      return true;
-    } catch(_) {
-      try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
-      token = null; username = null;
-      return false;
-    }
-  }
-
-   function updateAuthHeader(){
-     const st = $('authState');
-     const link = $('loginLink');
-     if (!st) return;
-     if (token) {
-       st.textContent = username ? `Logged in as ${username}` : 'Logged in';
-       if (link) link.style.display = 'none';
-     } else {
-       st.textContent = 'Logged out';
-       if (link) link.style.display = 'inline';
-     }
-   }
-let sessionId = null;
-let lastQuestionId = null;
-let lastChoiceIndex = null;
-let currentPassageIndex = 1;
-let maxPassages = 3;
-let questionsPerPassage = 5;
-let totalQuestions = 15;
-let nextQuestionData = null;
-let currentQuestionMeta = null;
-let awaitingSubmit = false;
-
-function handleAuthFailure(){
-  try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
-  token = null; username = null;
-  $('login-card').style.display = 'block';
-  $('start-card').style.display = 'none';
-  $('passage-card').style.display = 'none';
-  $('question-card').style.display = 'none';
-  $('finish-card').style.display = 'none';
-  updateAuthHeader();
-}
-
-(async () => {
-  const ok = await validateToken();
-  if (ok) {
-    $('login-card').style.display = 'none';
-    $('start-card').style.display = 'block';
-    updateAuthHeader();
-  } else {
-    $('login-card').style.display = 'block';
-    $('start-card').style.display = 'none';
-    updateAuthHeader();
-  }
-})();
-
-function cacheQuestionMeta(q) {
-  if (!q) {
-    currentQuestionMeta = null;
-    return;
-  }
-  currentQuestionMeta = {
-    correct_choice_index: Number.isInteger(q.correct_choice_index) ? q.correct_choice_index : null,
-    rationale: typeof q.rationale === 'string' ? q.rationale.trim() : '',
-  };
-}
-
-function applyLocalEvaluation(choiceIndex, { pending = false } = {}) {
-  if (!currentQuestionMeta || !Number.isInteger(currentQuestionMeta.correct_choice_index)) {
-    $('feedback').textContent = pending ? 'Checking…' : '';
-    return;
-  }
-  const buttons = Array.from(document.querySelectorAll('.choice'));
-  const correctIdx = currentQuestionMeta.correct_choice_index;
-  buttons.forEach((btn, idx) => {
-    btn.classList.remove('correct', 'incorrect');
-    if (idx === correctIdx) btn.classList.add('correct');
-    if (idx === choiceIndex && idx !== correctIdx) btn.classList.add('incorrect');
-  });
-  const isCorrect = choiceIndex === correctIdx;
-  let msg = isCorrect ? 'Correct.' : 'Incorrect.';
-  if (currentQuestionMeta.rationale) {
-    msg += ` ${currentQuestionMeta.rationale}`;
-  }
-  if (pending) {
-    msg += ' (Saving…)';
-  }
-  $('feedback').textContent = msg.trim();
-}
-
-function applyServerEvaluation(result, submittedIndex) {
-  const buttons = Array.from(document.querySelectorAll('.choice'));
-  const correctIdx = result.correct_choice_index;
-  buttons.forEach((btn, idx) => {
-    if (idx === correctIdx) btn.classList.add('correct');
-    if (idx === submittedIndex && idx !== correctIdx) btn.classList.add('incorrect');
-  });
-  const rationale = (result.rationale || '').trim();
-  $('feedback').textContent = `${result.correct ? 'Correct.' : 'Incorrect.'}${rationale ? ' ' + rationale : ''}`.trim();
-}
-
-function renderQuestion(q) {
-  if (!q) return;
-  cacheQuestionMeta(q);
-  lastQuestionId = q.id;
-  $('qHeader').textContent = `Question ${q.number}`;
-  $('qMeta').textContent = `CEFR ${q.level_cefr} (${q.cambridge_level}) • Passage ${currentPassageIndex}/${maxPassages}`;
-  $('qText').textContent = q.text;
-  $('feedback').textContent = '';
-  $('nextQuestionBtn').style.display = 'none';
-  $('retrySubmitBtn').style.display = 'none';
-  const container = $('choices');
-  container.innerHTML = '';
-  q.choices.forEach((choice, idx) => {
-    const btn = document.createElement('button');
-    btn.className = 'choice';
-    btn.textContent = choice;
-    btn.onclick = () => submit(idx);
-    container.appendChild(btn);
-  });
-}
-
-$('loginBtn').addEventListener('click', async () => {
-  $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
-  try {
-    const form = new URLSearchParams();
-    form.set('username', $('username').value);
-    form.set('password', $('password').value);
-    const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
-    if (!r.ok) throw new Error('login failed');
-    const j = await r.json();
-    token = j.access_token; username = $('username').value || null;
-    try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch(_) {}
-    $('loginMsg').textContent = username ? `Logged in as ${username}` : 'Logged in';
-    $('start-card').style.display = 'block';
-    $('login-card').style.display = 'none';
-    updateAuthHeader();
-  } catch (e) {
-    $('loginMsg').textContent = 'Login failed';
-  } finally { $('loginBtn').disabled = false; }
-});
-
-$('startBtn').addEventListener('click', async () => {
-  $('startBtn').disabled = true; $('startMsg').textContent = 'Starting…';
-  $('finish-card').style.display = 'none';
-  try {
-    const lastEndCefr = localStorage.getItem('last_session_end_cefr');
-    const requestBody = lastEndCefr ? { start_level: lastEndCefr } : {};
-    const r = await fetch('/read/session/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify(requestBody)
-    });
-    if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
-    if (!r.ok) throw new Error(await r.text());
-    const j = await r.json();
-    sessionId = j.session_id;
-    $('passage').textContent = j.passage;
-    currentPassageIndex = j.passage_index;
-    maxPassages = j.max_passages;
-    questionsPerPassage = j.questions_per_passage;
-    totalQuestions = j.total_questions;
-    $('levelInfo').textContent = `Passage ${currentPassageIndex}/${maxPassages} • Target: CEFR ${j.target_cefr} (${j.cambridge_level}) • ${questionsPerPassage} Q per passage • Total: ${totalQuestions}`;
-    renderQuestion(j.question);
-    $('passage-card').style.display = 'block';
-    $('question-card').style.display = 'block';
-    $('startMsg').textContent = '';
-  } catch (e) {
-    $('startMsg').textContent = String(e);
-  } finally { $('startBtn').disabled = false; }
-});
-
-async function submit(choiceIndex) {
-  if (awaitingSubmit) return;
-  awaitingSubmit = true;
-  lastChoiceIndex = choiceIndex;
-  const buttons = Array.from(document.querySelectorAll('.choice'));
-  buttons.forEach(b => b.disabled = true);
-  applyLocalEvaluation(choiceIndex, { pending: true });
-  try {
-    const r = await fetch('/read/session/submit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ session_id: sessionId, question_id: lastQuestionId, choice_index: choiceIndex })
-    });
-    if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
-    if (!r.ok) throw new Error(await r.text());
-    const j = await r.json();
-    applyServerEvaluation(j, choiceIndex);
-    cacheQuestionMeta({ correct_choice_index: j.correct_choice_index, rationale: j.rationale });
-    if (j.finished) {
-      $('finish-card').style.display = 'block';
-      if (j.summary) {
-        $('summary').textContent = `Total ${j.summary.total}. Correct ${j.summary.correct}. Incorrect ${j.summary.incorrect}. Start ${j.summary.start_cefr} → End ${j.summary.end_cefr}.`;
-        try { localStorage.setItem('last_session_end_cefr', j.summary.end_cefr); } catch(_) {}
-      }
-      nextQuestionData = null;
-      $('nextQuestionBtn').style.display = 'none';
-    } else {
-      if (j.new_passage) {
-        currentPassageIndex = j.passage_index;
-        maxPassages = j.max_passages;
-        questionsPerPassage = j.questions_per_passage;
-        $('passage').textContent = j.new_passage;
-        $('levelInfo').textContent = `Passage ${currentPassageIndex}/${maxPassages} • Target: CEFR ${j.updated_target_cefr} (${j.cambridge_level}) • ${questionsPerPassage} Q per passage • Total: ${totalQuestions}`;
-      }
-      nextQuestionData = j.next_question || null;
-      $('nextQuestionBtn').style.display = nextQuestionData ? 'block' : 'none';
-    }
-    $('retrySubmitBtn').style.display = 'none';
-  } catch (e) {
-    const msg = String(e?.message || e);
-    $('feedback').textContent = msg.includes('503 Service Unavailable')
-      ? 'Error: 503 Service Unavailable. Please try again.'
-      : msg;
-    $('retrySubmitBtn').style.display = 'inline-block';
-    $('nextQuestionBtn').style.display = 'none';
-  } finally {
-    awaitingSubmit = false;
-  }
-}
-
-function loadNextQuestion() {
-  $('nextQuestionBtn').style.display = 'none';
-  if (nextQuestionData) {
-    renderQuestion(nextQuestionData);
-    nextQuestionData = null;
-  }
-}
-
-async function retrySubmit() {
-  if (!Number.isInteger(lastChoiceIndex)) return;
-  $('retrySubmitBtn').disabled = true;
-  const buttons = Array.from(document.querySelectorAll('.choice'));
-  buttons.forEach(b => b.disabled = false);
-  await submit(lastChoiceIndex);
-  $('retrySubmitBtn').disabled = false;
-}
-
-window.loadNextQuestion = loadNextQuestion;
-window.retrySubmit = retrySubmit;
-</script>
 </body>
 </html>

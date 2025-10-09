@@ -4,346 +4,136 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Vocabulary Module</title>
-    <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
-        .container { max-width: 820px; margin: 0 auto; padding: 24px; }
-        .card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 20px; margin-top: 16px; }
-        label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c7d2fe; }
-        input, select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
-        button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .row { display: flex; gap: 12px; align-items: center; }
-        .row > * { flex: 1; }
-        .header { display: flex; justify-content: space-between; align-items: center; }
-        .small { color: #93c5fd; font-size: 12px; }
-        .passage { white-space: pre-wrap; word-break: break-word; background: #0a0f1f; border: 1px solid #1e2a55; padding: 12px; border-radius: 8px; }
-        .option { background: #0f172a; border: 1px solid #1e2a55; padding: 10px; border-radius: 8px; cursor: pointer; }
-        .option.selected { border-color: #2563eb; }
-        .option.correct { border-color: #16a34a; }
-        .option.incorrect { border-color: #dc2626; }
-        a { color: #93c5fd; }
-    </style>
+    <!--
+    VOCABULARY MODULE FRONTEND DOCUMENTATION
+    ========================================
+    
+    This file implements the frontend interface for the adaptive vocabulary assessment module.
+    It provides a complete vocabulary evaluation system with multiple choice questions,
+    adaptive difficulty, and real-time feedback integration with the backend API.
+    
+    BACKEND API INTEGRATION:
+    - POST /auth/token: User authentication
+    - POST /vocabulary/start: Initialize new vocabulary session
+    - POST /vocabulary/answer: Submit vocabulary answer for evaluation
+    - POST /vocabulary/next: Get next question in current session
+    - GET /auth/me: Validate current user token
+    
+    KEY FEATURES:
+    - Adaptive difficulty progression based on performance
+    - Multiple choice questions with immediate feedback
+    - Vocabulary comprehension assessment
+    - Session management with progress tracking
+    - Guest user support for testing
+    
+    BROWSER COMPATIBILITY:
+    - Modern browsers with ES2020 support
+    - Responsive design for mobile and desktop
+    
+    WORKFLOW:
+    1. User logs in (guest/any for testing)
+    2. Starts vocabulary session with initial CEFR level
+    3. Answers multiple choice vocabulary questions
+    4. Receives immediate feedback and adaptive level adjustment
+    5. Continues to next question or finishes session
+    -->
+    
+    <!-- Shared CSS -->
+    <link rel="stylesheet" href="../shared/css/base.css">
+    <link rel="stylesheet" href="../shared/css/components.css">
+    <!-- Module-specific CSS -->
+    <link rel="stylesheet" href="styles.css?v=20251013">
+    <!-- Shared JavaScript -->
+    <script src="../shared/js/auth.js?v=20251019"></script>
+    <script src="../shared/js/api.js?v=20251019"></script>
+    <!-- Module-specific JavaScript -->
+    <script src="vocabulary.js?v=20251019"></script>
     <link rel="icon" href="data:," />
     <base href="/app/" />
-    <script defer>
-        const $ = (id) => document.getElementById(id);
-        let token = localStorage.getItem('token');
-        let username = localStorage.getItem('username');
-        async function validateToken(){
-            if (!token) return false;
-            try {
-                const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
-                if (!r.ok) throw new Error('invalid');
-                const u = await r.json().catch(() => null);
-                if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
-                return true;
-            } catch(_){
-                try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
-                token = null; username = null;
-                return false;
-            }
-        }
-        let sessionId = null;
-        let currentQuestionId = null;
-        let currentAnswerIndex = null;
-        let currentQuestionData = null; // Store full question data for immediate feedback
-        let nextQuestionData = null;    // Store pre-fetched next question
-        let isFetchingNextQuestion = false; // Flag to prevent multiple fetches
-
-        async function login(username, password) {
-            const form = new URLSearchParams();
-            form.set('username', username);
-            form.set('password', password);
-            const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
-            if (!r.ok) throw new Error('login failed');
-            const j = await r.json();
-            token = j.access_token;
-            try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch(_) {}
-        }
-
-        async function startSession(startLevel) {
-            const r = await fetch('/vocabulary/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ start_level: startLevel })
-            });
-            let bodyText = '';
-            try { bodyText = await r.text(); } catch (_) {}
-            if (!r.ok) {
-                let msg = 'start failed';
-                try { const j = JSON.parse(bodyText); msg = j.detail || msg; } catch(_) { if (bodyText) msg = bodyText; }
-                throw new Error(msg);
-            }
-            const j = bodyText ? JSON.parse(bodyText) : await r.json();
-            sessionId = j.session_id;
-            renderQuestion(j);
-        }
-
-        function renderQuestion(payload) {
-            currentQuestionData = payload.question; // Store the full question data
-            $('sessionMeta').textContent = `Level: ${payload.level} • ${payload.progress_current}/${payload.progress_total}`;
-            const q = payload.question;
-            currentQuestionId = q.id;
-            currentAnswerIndex = q.answer_index;
-            $('passage').textContent = q.passage;
-
-            if (q.passage.includes("The Gemini API is currently unavailable.")) {
-                $('qtext').style.display = 'none';
-                $('qtext').textContent = ''; // Clear any default question text
-                $('options').style.display = 'none';
-                $('submitBtn').style.display = 'none';
-                $('feedback').textContent = "The Gemini API is currently unavailable. Please try again later.";
-                $('nextBtn').style.display = 'inline-block';
-                $('nextBtn').textContent = 'Back to home';
-                $('nextBtn').onclick = () => { window.location.href = '/app/'; };
-            } else {
-                $('qtext').style.display = 'block';
-                $('options').style.display = 'grid';
-                $('submitBtn').style.display = 'inline-block';
-                $('qtext').textContent = q.question;
-                const opts = $('options');
-                opts.innerHTML = '';
-                q.options.forEach((opt, idx) => {
-                    const div = document.createElement('div');
-                    div.className = 'option';
-                    div.textContent = opt;
-                    div.onclick = () => selectOption(idx);
-                    opts.appendChild(div);
-                });
-                $('feedback').textContent = '';
-                $('submitBtn').disabled = true;
-                $('nextBtn').style.display = 'none';
-            }
-            fetchNextQuestion(); // Start pre-fetching the next question
-        }
-
-        let selectedIndex = null;
-        function selectOption(idx) {
-            selectedIndex = idx;
-            Array.from(document.querySelectorAll('.option')).forEach((el, i) => {
-                el.classList.toggle('selected', i === idx);
-            });
-            $('submitBtn').disabled = false;
-        }
-
-        async function submitAnswer() {
-            $('submitBtn').disabled = true;
-
-            // Immediate feedback
-            const wasCorrect = (selectedIndex === currentQuestionData.answer_index);
-            $('feedback').textContent = (wasCorrect ? 'Correct. ' : 'Incorrect. ') + (currentQuestionData.rationale || '');
-            const opts = document.querySelectorAll('.option');
-            opts.forEach((el, i) => {
-                el.classList.remove('selected');
-                if (i === currentQuestionData.answer_index) el.classList.add('correct');
-                if (i === selectedIndex && !wasCorrect) el.classList.add('incorrect');
-                el.style.pointerEvents = 'none'; // Disable options after submission
-            });
-
-            try {
-                const r = await fetch('/vocabulary/answer', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ session_id: sessionId, question_id: currentQuestionId, choice_index: selectedIndex })
-                });
-                const j = await r.json();
-                if (!r.ok) {
-                    if (r.status === 503) {
-                        $('feedback').textContent = j.detail || 'Gemini API unavailable. No question could be generated.';
-                        $('submitBtn').style.display = 'none';
-                        $('retryBtn').style.display = 'inline-block';
-                    } else {
-                        throw new Error(j.detail || 'answer failed');
-                    }
-                    return;
-                }
-                $('sessionMeta').textContent = `Level: ${j.level} • ${j.progress_current}/${j.progress_total}`;
-
-                if (j.finished) {
-                    $('submitBtn').style.display = 'none';
-                    $('nextBtn').style.display = 'inline-block';
-                    $('nextBtn').textContent = 'Session finished — back to home';
-                    $('nextBtn').onclick = () => { window.location.href = '/app/'; };
-                } else {
-                    $('nextBtn').style.display = 'inline-block';
-                    $('nextBtn').textContent = 'Next';
-                    // Enable next button only if the next question is already pre-fetched
-                    $('nextBtn').disabled = !nextQuestionData;
-                    $('nextBtn').onclick = () => {
-                        if (nextQuestionData) {
-                            renderQuestion({ level: j.level, progress_current: j.progress_current, progress_total: j.progress_total, question: nextQuestionData });
-                            nextQuestionData = null; // Clear the pre-fetched question
-                            $('nextBtn').disabled = true; // Disable until new next question is fetched
-                            selectedIndex = null; // Reset selected option
-                        }
-                    };
-                }
-            } catch (e) {
-                $('feedback').textContent = String(e);
-            }
-        }
-
-        function updateAuthHeader(){
-            const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
-            if (!st) return;
-            if (token) { st.textContent = username ? `Logged in as ${username}` : 'Logged in'; if (link) link.style.display='none'; }
-            else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
-        }
-
-        async function retryGenerateQuestion() {
-            $('retryBtn').disabled = true; $('feedback').textContent = 'Retrying…';
-            try {
-                // Re-enable options and show submit button
-                Array.from(document.querySelectorAll('.option')).forEach(el => el.style.pointerEvents = 'auto');
-                $('retryBtn').style.display = 'none';
-                $('submitBtn').style.display = 'inline-block';
-                $('feedback').textContent = ''; // Clear feedback
-
-                // Attempt to fetch the next question
-                await fetchNextQuestion();
-
-                // If next question is available, enable the next button
-                if (nextQuestionData) {
-                    $('nextBtn').disabled = false;
-                }
-            } catch (e) {
-                $('feedback').textContent = String(e);
-            } finally {
-                $('retryBtn').disabled = false;
-            }
-        }
-
-        async function fetchNextQuestion() {
-            if (isFetchingNextQuestion || !sessionId) return; // Prevent multiple fetches or if session not started
-            isFetchingNextQuestion = true;
-            nextQuestionData = null; // Clear previous next question
-            $('nextBtn').disabled = true; // Disable next button while fetching
-
-            try {
-                const r = await fetch('/vocabulary/next_question', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ session_id: sessionId })
-                });
-                const j = await r.json();
-                if (!r.ok) {
-                    throw new Error(j.detail || 'Failed to fetch next question');
-                }
-                nextQuestionData = j.question;
-            } catch (e) {
-                console.error("Error fetching next question:", e);
-                // Optionally display an error, but don't block the user
-            } finally {
-                isFetchingNextQuestion = false;
-                // If an answer has already been submitted, enable the next button now
-                if (selectedIndex !== null && nextQuestionData) {
-                    $('nextBtn').disabled = false;
-                }
-            }
-        }
-
-        window.addEventListener('DOMContentLoaded', async () => {
-            const ok = await validateToken();
-            if (ok) {
-                $('loginCard').style.display = 'none';
-                $('startCard').style.display = 'block';
-                updateAuthHeader();
-            } else {
-                $('loginCard').style.display = 'block';
-                $('startCard').style.display = 'none';
-                updateAuthHeader();
-            }
-            $('loginBtn').addEventListener('click', async () => {
-                $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
-                try {
-                    await login($('username').value, $('password').value);
-                    $('loginMsg').textContent = 'Logged in';
-                    $('startCard').style.display = 'block';
-                    $('loginCard').style.display = 'none';
-                    updateAuthHeader();
-                } catch (e) {
-                    $('loginMsg').textContent = 'Login failed';
-                } finally {
-                    $('loginBtn').disabled = false;
-                }
-            });
-
-            $('startBtn').addEventListener('click', async () => {
-                $('startBtn').disabled = true; $('startMsg').textContent = '…';
-                try {
-                    await startSession('A2');
-                    $('sessionCard').style.display = 'block';
-                } catch (e) {
-                    $('startMsg').textContent = e && e.message ? e.message : 'Start failed';
-                } finally {
-                    $('startBtn').disabled = false;
-                }
-            });
-
-            $('submitBtn').addEventListener('click', submitAnswer);
-            $('retryBtn').addEventListener('click', retryGenerateQuestion);
-        });
-    </script>
 </head>
 <body>
     <div class="container">
+        <!-- Header with navigation and auth state -->
         <div class="header">
-            <h2>Vocabulary (Adaptive)</h2>
-            <div class="small"><a href="/app/">Home</a> · <span id="authState">Logged out</span> <a href="/app/" id="loginLink">Login</a></div>
+            <h1>Vocabulary Module</h1>
+            <div class="small">
+                <a href="/app">Home</a> · 
+                <span id="authState">Logged out</span> 
+                <a href="/app" id="loginLink">Login</a>
+            </div>
         </div>
 
+        <!-- Back navigation card -->
         <div class="card">
             <button onclick="window.location.href = '/app/';">← Back</button>
         </div>
 
-        <div class="card" id="loginCard">
-            <h3>Login</h3>
-            <div class="row">
-                <div>
-                    <label>Username</label>
-                    <input id="username" placeholder="username" value="guest" />
+        <div id="status" class="small"></div>
+
+        <!-- Login Form -->
+        <div id="login-card" class="card">
+            <h2>Login</h2>
+            <form id="loginForm">
+                <div class="row">
+                    <div>
+                        <label for="username">Username</label>
+                        <input id="username" type="text" placeholder="username" value="guest" required>
+                    </div>
+                    <div>
+                        <label for="password">Password</label>
+                        <input id="password" type="password" placeholder="password" value="any" required>
+                    </div>
                 </div>
-                <div>
-                    <label>Password</label>
-                    <input id="password" type="password" placeholder="password" value="any" />
+                <div style="margin-top:12px">
+                    <button type="submit">Login</button>
                 </div>
-            </div>
-            <div style="margin-top:12px">
-                <button id="loginBtn">Login</button>
-                <span id="loginMsg" class="small" style="margin-left:8px"></span>
+            </form>
+        </div>
+
+        <!-- Main Interface -->
+        <div id="session-card" class="hidden">
+            <div class="card">
+                <h2>Vocabulary Assessment</h2>
+                <p>This assessment will evaluate your vocabulary knowledge through multiple choice questions.</p>
+                <p>You will be asked to choose the correct definition for various words. The difficulty will adjust based on your performance.</p>
+                
+                <div class="vocabulary-level">
+                    <span>Starting Level:</span>
+                    <span class="level-badge" id="startingLevel">A2</span>
+                </div>
+                
+                <button id="startBtn">Start Vocabulary Assessment</button>
             </div>
         </div>
 
-        <div class="card" id="startCard" style="display:none">
-            <h3>Start Session</h3>
-            <div class="row">
-                <div class="small">Starting at CEFR A2. Difficulty adapts based on your answers.</div>
+        <!-- Assessment Interface -->
+        <div id="assessment-interface" class="hidden">
+            <!-- Progress Display -->
+            <div id="progress" class="hidden">
+                <!-- Progress will be populated by JavaScript -->
             </div>
-            <div style="margin-top:12px">
-                <button id="startBtn">Start</button>
-                <span id="startMsg" class="small" style="margin-left:8px"></span>
+
+            <!-- Vocabulary Question -->
+            <div id="question" class="hidden">
+                <!-- Question will be populated by JavaScript -->
+            </div>
+
+            <!-- Submit Button -->
+            <div class="card">
+                <button id="submitBtn" disabled>Submit Answer</button>
+            </div>
+
+            <!-- Continue Button -->
+            <div class="card hidden" id="continueBtn">
+                <button onclick="continueToNext()">Continue to Next Question</button>
             </div>
         </div>
 
-        <div class="card" id="sessionCard" style="display:none">
-            <h3>Question <span id="sessionMeta" class="small" style="margin-left:8px"></span></h3>
-            <div class="small">Passage</div>
-            <div id="passage" class="passage"></div>
-            <div style="height:8px"></div>
-            <div id="qtext"></div>
-            <div id="options" style="display:grid; gap:8px; margin-top:12px"></div>
-            <div style="margin-top:12px">
-                <button id="submitBtn" disabled>Submit</button>
-                <button id="nextBtn" style="display:none">Next</button>
-                <button id="retryBtn" style="display:none">Retry generate an answer</button>
-            </div>
-            <div id="feedback" class="small" style="margin-top:8px"></div>
+        <!-- Results Display -->
+        <div id="results" class="hidden">
+            <!-- Results will be populated by JavaScript -->
         </div>
+
     </div>
 </body>
-<!--
-Served at /app/vocabulary/ (and usually at /app/vocabulary via redirect).
--->
 </html>
-
-

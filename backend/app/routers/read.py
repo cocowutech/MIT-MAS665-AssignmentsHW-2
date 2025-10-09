@@ -1,3 +1,32 @@
+"""
+Reading Assessment Module
+=========================
+
+This module provides adaptive reading assessment functionality for the English
+placement test. It generates reading passages and questions at appropriate CEFR levels,
+evaluates student responses using LLM-based assessment, and adjusts difficulty dynamically.
+
+Key Features:
+- Adaptive difficulty adjustment based on performance
+- LLM-powered evaluation with heuristic fallback
+- Reading comprehension assessment
+- Cambridge exam alignment (KET/PET/FCE)
+- Session management with progress tracking
+
+The module uses a hybrid approach combining:
+1. LLM-based evaluation for sophisticated assessment
+2. Heuristic analysis as fallback for reliability
+3. Reading comprehension scoring via multiple choice questions
+
+API Endpoints:
+- POST /read/start: Begin new assessment session
+- POST /read/answer: Submit reading answer for evaluation
+- POST /read/next: Get next question in current session
+
+Author: ESL Assessment System
+Version: 1.0
+"""
+
 from __future__ import annotations
 import json
 import re
@@ -13,21 +42,34 @@ from ..db import get_db
 from ..models import UserAccount, ReadModule
 from sqlalchemy.orm import Session
 
-
 router = APIRouter(prefix="/read", tags=["reading_module"])
 
-# Force reload comment
+# ============================================================================
+# CONSTANTS AND CONFIGURATION
+# ============================================================================
 
-
+# CEFR levels supported by the reading assessment
 CEFR_ORDER: List[str] = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
+# Cambridge exam mapping by CEFR level
 CAMBRIDGE_BY_CEFR: Dict[str, str] = {"A1": "KET", "A2": "KET", "B1": "PET", "B2": "FCE", "C1": "FCE", "C2": "FCE"}
 
 
+# ============================================================================
+# REQUEST/RESPONSE MODELS
+# ============================================================================
+
 class StartRequest(BaseModel):
+    """
+    Request model for starting a new reading session.
+    """
     start_level: Optional[str] = Field(default="B1", description="Initial CEFR level A1–C2")
 
 
 class SubmitRequest(BaseModel):
+    """
+    Request model for submitting reading answers.
+    """
     session_id: str
     question_id: str
     choice_index: int
@@ -235,6 +277,10 @@ def _adjust_final_by_last_five(current_cefr: str, outcomes: List[bool]) -> str:
     return CEFR_ORDER[idx]
 
 
+# ============================================================================
+# API ENDPOINTS
+# ============================================================================
+
 @router.post("/session/start")
 async def start_session(req: StartRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     level = _validate_cefr(req.start_level)
@@ -361,14 +407,14 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
             state.cambridge_level = CAMBRIDGE_BY_CEFR[state.current_cefr]
             state.ended = True
         else:
-            # Generate next passage and all its questions
-            client = GeminiClient(model="gemini-2.0-flash-lite")
-            try:
-                new_passage_text = await _llm_generate_passage(client, state.current_cefr, state.cambridge_level)
-                state.passage = new_passage_text
-                all_questions = await _llm_generate_passage_questions(client, state)
-                state.current_passage_questions = all_questions
-                q = all_questions[0] # Get the first question of the new passage
+            # Check if we have preloaded data
+            if hasattr(state, 'next_passage_preloaded') and state.next_passage_preloaded:
+                # Use preloaded passage and questions
+                state.passage = state.next_passage_text
+                state.current_cefr = state.next_passage_cefr
+                state.cambridge_level = state.next_passage_cambridge_level
+                state.current_passage_questions = state.next_passage_questions
+                q = state.next_passage_questions[0] # Get the first question of the new passage
                 state.questions.append(q)
                 state.num_asked += 1
                 state.questions_in_passage_asked = 1
@@ -382,8 +428,36 @@ async def submit_answer(req: SubmitRequest, user: User = Depends(get_current_use
                     "correct_choice_index": q["correct_index"],
                     "rationale": q.get("rationale", ""),
                 }
-            finally:
-                await client.aclose()
+                # Clear preloaded data
+                delattr(state, 'next_passage_text')
+                delattr(state, 'next_passage_questions')
+                delattr(state, 'next_passage_cefr')
+                delattr(state, 'next_passage_cambridge_level')
+                delattr(state, 'next_passage_preloaded')
+            else:
+                # Generate next passage and all its questions
+                client = GeminiClient(model="gemini-2.0-flash-lite")
+                try:
+                    new_passage_text = await _llm_generate_passage(client, state.current_cefr, state.cambridge_level)
+                    state.passage = new_passage_text
+                    all_questions = await _llm_generate_passage_questions(client, state)
+                    state.current_passage_questions = all_questions
+                    q = all_questions[0] # Get the first question of the new passage
+                    state.questions.append(q)
+                    state.num_asked += 1
+                    state.questions_in_passage_asked = 1
+                    next_question_payload = {
+                        "id": q["id"],
+                        "number": q["number"],
+                        "text": q["question"],
+                        "choices": q["choices"],
+                        "level_cefr": q["level_cefr"],
+                        "cambridge_level": q["cambridge_level"],
+                        "correct_choice_index": q["correct_index"],
+                        "rationale": q.get("rationale", ""),
+                    }
+                finally:
+                    await client.aclose()
     else:
         # Continue within the same passage, retrieve next question from cache
         if state.current_question_index < len(state.current_passage_questions):
@@ -487,6 +561,73 @@ async def get_state(session_id: str, user: User = Depends(get_current_user)):
             else None
         ),
     }
+
+
+@router.post("/session/preload")
+async def preload_next_passage(req: SubmitRequest, user: User = Depends(get_current_user)):
+    """
+    Preload the next passage and its questions for faster loading.
+    This endpoint should be called after question 3 to prepare the next passage.
+    """
+    state = _sessions.get(req.session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if state.ended:
+        raise HTTPException(status_code=400, detail="Session has ended")
+    
+    # Only preload if we're at question 3 or later and haven't preloaded yet
+    if state.num_asked >= 3 and not hasattr(state, 'next_passage_preloaded'):
+        try:
+            # Generate next passage and questions
+            client = GeminiClient(model="gemini-2.0-flash-lite")
+            try:
+                # Predict the next CEFR level based on current performance
+                next_cefr = state.current_cefr
+                if state.correct_in_passage >= 4:
+                    idx = CEFR_ORDER.index(state.current_cefr)
+                    if idx < len(CEFR_ORDER) - 1:
+                        next_cefr = CEFR_ORDER[idx + 1]
+                elif state.correct_in_passage <= 1:
+                    idx = CEFR_ORDER.index(state.current_cefr)
+                    if idx > 0:
+                        next_cefr = CEFR_ORDER[idx - 1]
+                
+                next_cambridge_level = CAMBRIDGE_BY_CEFR[next_cefr]
+                
+                # Generate next passage and questions
+                next_passage_text = await _llm_generate_passage(client, next_cefr, next_cambridge_level)
+                
+                # Create a temporary state for generating questions
+                temp_state = SessionState(
+                    session_id="temp",
+                    username=state.username,
+                    passage=next_passage_text,
+                    start_cefr=next_cefr,
+                    max_passages=state.max_passages,
+                    questions_per_passage=state.questions_per_passage
+                )
+                temp_state.current_cefr = next_cefr
+                temp_state.cambridge_level = next_cambridge_level
+                
+                next_passage_questions = await _llm_generate_passage_questions(client, temp_state)
+                
+                # Store preloaded data
+                state.next_passage_text = next_passage_text
+                state.next_passage_questions = next_passage_questions
+                state.next_passage_cefr = next_cefr
+                state.next_passage_cambridge_level = next_cambridge_level
+                state.next_passage_preloaded = True
+                
+            finally:
+                await client.aclose()
+                
+        except Exception as e:
+            # If preloading fails, continue without it
+            print(f"Preloading failed: {e}")
+            pass
+    
+    return {"status": "success", "preloaded": getattr(state, 'next_passage_preloaded', False)}
 
 
 @router.get("/summary")

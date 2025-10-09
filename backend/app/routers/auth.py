@@ -4,7 +4,7 @@ from typing import Optional, Dict
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from pydantic import BaseModel
 import logging
 
@@ -15,8 +15,14 @@ from ..models import AuthUser, AuthSession
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-logging.getLogger('passlib').setLevel(logging.ERROR)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use bcrypt directly to avoid passlib version compatibility issues
+def hash_password(password: str) -> str:
+    """Hash a password using bcrypt"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify a password against its hash"""
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
@@ -41,11 +47,11 @@ def _ensure_seed_user() -> None:
 		password_bytes = password.encode('utf-8')
 		if len(password_bytes) > 72:
 			password_bytes = password_bytes[:72]
-		_users[username] = pwd_context.hash(password_bytes.decode('utf-8', errors='ignore'))
+		_users[username] = hash_password(password_bytes.decode('utf-8', errors='ignore'))
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-	return pwd_context.verify(plain_password, hashed_password)
+def verify_password_db(plain_password: str, hashed_password: str) -> bool:
+	return verify_password(plain_password, hashed_password)
 
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
@@ -55,12 +61,12 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
 	
 	# Try DB-backed users first
 	user_row = db.query(AuthUser).filter(AuthUser.username == username).first()
-	if user_row and verify_password(password, user_row.password_hash):
+	if user_row and verify_password_db(password, user_row.password_hash):
 		return User(username=username)
 	# Fallback to seed in-memory user for dev convenience
 	_ensure_seed_user()
 	hashed = _users.get(username)
-	if hashed and verify_password(password, hashed):
+	if hashed and verify_password_db(password, hashed):
 		return User(username=username)
 	return None
 
@@ -174,7 +180,7 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
 		raise HTTPException(status_code=409, detail="username already exists")
 	# Create user
 	limit = 1000000 if username == "rong_wu" else 1000
-	row = AuthUser(username=username, password_hash=pwd_context.hash(password), email=email, phone=phone, requests_limit=limit)
+	row = AuthUser(username=username, password_hash=hash_password(password), email=email, phone=phone, requests_limit=limit)
 	db.add(row)
 	db.commit()
 	return {"ok": True}

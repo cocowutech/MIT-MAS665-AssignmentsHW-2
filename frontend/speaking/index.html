@@ -41,774 +41,135 @@
     6. Receives feedback and adaptive level adjustment
     7. Continues to next task or finishes session
     -->
-    <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
-        .container { max-width: 820px; margin: 0 auto; padding: 24px; }
-        .card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 20px; margin-top: 16px; }
-        label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c7d2fe; }
-        input, textarea { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
-        button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .hidden { display: none !important; }
-        .row { display: flex; gap: 12px; align-items: center; }
-        .row > * { flex: 1; }
-        .small { color: #93c5fd; font-size: 12px; }
-        .timer { font-variant-numeric: tabular-nums; }
-        audio { width: 100%; margin-top: 8px; }
-        .header { display: flex; justify-content: space-between; align-items: center; }
-        a { color: #93c5fd; }
-    </style>
-    <script>
-        // ============================================================================
-        // GLOBAL STATE VARIABLES
-        // ============================================================================
-        
-        const $ = (id) => document.getElementById(id);
-        
-        // Authentication state
-        let token = localStorage.getItem('token');
-        let username = localStorage.getItem('username');
-        
-        // Audio recording state
-        let mediaRecorder = null;           // MediaRecorder instance for audio capture
-        let recordedChunks = [];           // Array of audio data chunks
-        let recordedAudioBlob = null;      // Final audio blob for submission
-        
-        // Session and UI state
-        let countdownInterval = null;       // Timer for prep/record countdowns
-        let recognition = null;             // Speech recognition instance
-        let isRecording = false;            // Current recording status
-        let hasRecordedThisItem = false;    // Prevents re-recording same item
-        let transcriptText = '';            // Current transcript text
-        let submitTriggered = false;        // Prevents double submission
-        let asrFinalText = '';              // Finalized speech recognition text
-        let session = null;                  // Current session data
-        let nextPendingItem = null;         // Next item waiting for user action
-        let micPermissionState = 'unknown'; // Microphone permission status
-
-        // ============================================================================
-        // UTILITY FUNCTIONS
-        // ============================================================================
-        
-        /**
-         * Show an element by removing the 'hidden' class
-         * @param {string|Element} el - Element ID or DOM element
-         */
-        function show(el) {
-            const node = typeof el === 'string' ? $(el) : el;
-            if (!node) return;
-            node.classList.remove('hidden');
-        }
-
-        /**
-         * Hide an element by adding the 'hidden' class
-         * @param {string|Element} el - Element ID or DOM element
-         */
-        function hide(el) {
-            const node = typeof el === 'string' ? $(el) : el;
-            if (!node) return;
-            node.classList.add('hidden');
-        }
-
-        // ============================================================================
-        // AUTHENTICATION FUNCTIONS
-        // ============================================================================
-        
-        /**
-         * Authenticate user with backend and store token
-         * Backend: POST /auth/token (auth.py:login)
-         * @param {string} username - User login name
-         * @param {string} password - User password
-         * @returns {Promise<string>} JWT access token
-         * @throws {Error} If authentication fails
-         */
-        async function login(username, password){
-            const form = new URLSearchParams();
-            form.set('username', username);
-            form.set('password', password);
-            const r = await fetch('/auth/token', { method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body: form });
-            if(!r.ok) throw new Error('login failed');
-            const j = await r.json();
-            try { localStorage.setItem('token', j.access_token); if (username) localStorage.setItem('username', username); } catch(_) {}
-            return j.access_token;
-        }
-
-        // ============================================================================
-        // SPEAKING SESSION FUNCTIONS
-        // ============================================================================
-        
-        /**
-         * Initialize a new speaking assessment session
-         * Backend: POST /speaking/start (speaking.py:start)
-         * @returns {Promise<Object>} Session data with first speaking task
-         * @throws {Error} If session initialization fails
-         */
-        async function startSession(){
-            const r = await fetch('/speaking/start', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ start_level: 'A2' }) });
-            if(!r.ok) throw new Error('start failed');
-            return await r.json();
-        }
-
-        // ============================================================================
-        // MICROPHONE AND AUDIO FUNCTIONS
-        // ============================================================================
-        
-        /**
-         * Request and validate microphone permissions
-         * Handles browser compatibility and permission states
-         * @returns {Promise<boolean>} True if microphone access granted
-         */
-        async function ensureMicrophonePermission(){
-            if (micPermissionState === 'granted') return true;
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                const status = document.getElementById('status');
-                if (status) status.textContent = 'Microphone not supported in this browser. Please try Chrome or Firefox.';
-                micPermissionState = 'unsupported';
-                return false;
-            }
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stream.getTracks().forEach(track => track.stop());
-                micPermissionState = 'granted';
-                return true;
-            } catch (err) {
-                micPermissionState = 'denied';
-                const status = document.getElementById('status');
-                if (status) {
-                    status.textContent = 'Please allow microphone access to continue.';
-                }
-                alert('Microphone permission is required. Please allow access when prompted and try again.');
-                return false;
-            }
-        }
-
-        /**
-         * Convert milliseconds to seconds (rounded up)
-         * @param {number} ms - Milliseconds
-         * @returns {number} Seconds
-         */
-        function msToS(ms){ return Math.max(0, Math.ceil(ms/1000)); }
-
-        /**
-         * Clean and deduplicate speech recognition transcript
-         * Removes repeated phrases and normalizes whitespace
-         * Backend equivalent: speaking.py:_dedupe_transcript()
-         * @param {string} text - Raw transcript text
-         * @returns {string} Cleaned transcript
-         */
-        function cleanTranscript(text){
-            let s = (text || '').replace(/\s+/g, ' ').trim();
-            if(!s) return s;
-            const patterns = [
-                [/(\b\w+\s+\w+\s+\w+)(?:\s+\1\b)+/gi, '$1'],
-                [/(\b\w+\s+\w+)(?:\s+\1\b)+/gi, '$1'],
-                [/(\b\w+)(?:\s+\1\b)+/gi, '$1'],
-            ];
-            for (const [pat, rep] of patterns) { s = s.replace(pat, rep); }
-            return s.replace(/\s+/g, ' ').trim();
-        }
-
-        // ============================================================================
-        // UI STATE MANAGEMENT FUNCTIONS
-        // ============================================================================
-        
-        /**
-         * Start preparation phase with countdown timer
-         * Manages UI state transitions between prep and recording phases
-         * @param {number} prepSeconds - Preparation time in seconds
-         * @param {number} recordSeconds - Recording time limit in seconds
-         */
-        async function startPrepAndRecord(prepSeconds, recordSeconds){
-            $('prepTimer').textContent = prepSeconds;
-            $('recordTimer').textContent = Math.min(recordSeconds, 60);
-            show('prep');
-            hide('record');
-            isRecording = false;
-            hasRecordedThisItem = false;
-            transcriptText = '';
-            submitTriggered = false;
-            $('audioPlayback').src = '';
-            $('recordBtn').textContent = 'Start';
-            $('recordBtn').disabled = false;
-
-            if(countdownInterval) clearInterval(countdownInterval);
-            let remaining = prepSeconds;
-            countdownInterval = setInterval(() => {
-                remaining -= 1;
-                $('prepTimer').textContent = remaining;
-                if(remaining <= 0){
-                    clearInterval(countdownInterval);
-                    // Reveal recording controls and start 5s auto-start countdown
-                    showRecordUI(parseInt($('recordTimer').textContent, 10) || 60);
-                }
-            }, 1000);
-        }
-
-        // ============================================================================
-        // SPEECH RECOGNITION FUNCTIONS
-        // ============================================================================
-        
-        /**
-         * Initialize browser speech recognition (ASR)
-         * Provides real-time transcription of user speech
-         * @returns {SpeechRecognition|null} ASR instance or null if unsupported
-         */
-        function initASR(){
-            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if(!SR){
-                const warn = $('asrWarning');
-                if(warn) warn.textContent = 'Speech recognition not supported in this browser.';
-                return null;
-            }
-            const r = new SR();
-            r.lang = 'en-US';
-            r.interimResults = true;
-            r.continuous = true;
-            r.onresult = (event) => {
-                let interimText = '';
-                for(let i = event.resultIndex; i < event.results.length; i++){
-                    const res = event.results[i];
-                    if(res.isFinal){ asrFinalText += res[0].transcript + ' '; }
-                    else { interimText += res[0].transcript; }
-                }
-                transcriptText = (asrFinalText + interimText).trim();
-                const t = $('transcript'); if(t) t.textContent = cleanTranscript(transcriptText);
-            };
-            r.onerror = () => {};
-            r.onend = () => {
-                // Manual submit required; no auto-submit on ASR end
-            };
-            return r;
-        }
-
-        // ============================================================================
-        // AUDIO RECORDING FUNCTIONS
-        // ============================================================================
-        
-        /**
-         * Start audio recording with MediaRecorder API
-         * Captures audio data and provides real-time speech recognition
-         * @param {number} recordSeconds - Maximum recording duration
-         */
-        async function beginRecording(recordSeconds){
-            console.log('beginRecording called');
-            hide('prep');
-            show('record');
-            $('recordBtn').textContent = 'Stop';
-            $('recordBtn').disabled = false;
-            isRecording = true;
-            const as = $('autostart'); if (as) hide(as);
-            transcriptText = '';
-            asrFinalText = '';
-            recordedChunks = [];
-            hide('submitBtn');
-            try {
-                if (!window.MediaRecorder) {
-                    throw new Error("Browser incompatibility: MediaRecorder not supported.");
-                }
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                console.log('getUserMedia successful');
-                mediaRecorder = new MediaRecorder(stream);
-                if (!mediaRecorder) {
-                    console.error("Failed to create MediaRecorder. mediaRecorder is null.");
-                    throw new Error("Failed to create MediaRecorder. Microphone access might be denied or not available.");
-                }
-                mediaRecorder.ondataavailable = (e) => { 
-                    if(e.data.size > 0) {
-                        recordedChunks.push(e.data);
-                        console.log('ondataavailable: chunk size', e.data.size, 'total chunks', recordedChunks.length);
-                    }
-                };
-                mediaRecorder.onstop = () => {
-                    console.log('mediaRecorder.onstop fired. Total chunks:', recordedChunks.length);
-                    const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-                    recordedAudioBlob = blob; // Store the blob
-                    $('audioPlayback').src = URL.createObjectURL(blob);
-                    // Reveal Submit button after recording stops
-                    show('submitBtn');
-                    console.log('Submit button shown');
-                };
-                mediaRecorder.start();
-                console.log('mediaRecorder started');
-            } catch (err) {
-                console.error('Microphone access/MediaRecorder failed:', err);
-                let errorMessage = 'Microphone error: ';
-                if (err.name === 'NotAllowedError') {
-                    errorMessage += 'Access denied. Please allow microphone access in your browser settings.';
-                } else if (err.name === 'NotFoundError') {
-                    errorMessage += 'No microphone found. Please ensure a microphone is connected and recognized by your system.';
-                } else if (err.message.includes('MediaRecorder not supported')) {
-                    errorMessage += 'Browser incompatibility: MediaRecorder is not supported. Please try a different browser (e.g., Chrome, Firefox).';
-                } else {
-                    errorMessage += 'An unexpected error occurred: ' + err.message;
-                }
-                alert(errorMessage);
-                stopRecording();
-                return;
-            }
-
-            let remaining = parseInt($('recordTimer').textContent, 10) || 60;
-            if(countdownInterval) clearInterval(countdownInterval);
-            countdownInterval = setInterval(() => {
-                remaining -= 1;
-                $('recordTimer').textContent = remaining;
-                if(remaining <= 0){ stopRecording(); }
-            }, 1000);
-
-            if(!recognition){ recognition = initASR(); }
-            try{ if(recognition) recognition.start(); } catch(_) {}
-        }
-
-        /**
-         * Stop audio recording and finalize audio blob
-         * Stops MediaRecorder and speech recognition, enables submission
-         */
-        function stopRecording(){
-            console.log('stopRecording called');
-            if(countdownInterval) clearInterval(countdownInterval);
-            if(mediaRecorder && mediaRecorder.state !== 'inactive'){
-                mediaRecorder.stop();
-                console.log('mediaRecorder stopped');
-            }
-            try{ if(recognition) recognition.stop(); } catch(_) {}
-            isRecording = false;
-            hasRecordedThisItem = true;
-            $('recordBtn').textContent = 'Start';
-            // Disable to prevent re-recording
-            $('recordBtn').disabled = true;
-            // Show Submit button; user must submit manually
-            show('submitBtn');
-            console.log('Submit button shown (stopRecording)');
-        }
-
-        /**
-         * Convert audio blob to base64 string for API submission
-         * @param {Blob} blob - Audio blob from MediaRecorder
-         * @returns {Promise<string>} Base64 encoded audio data
-         */
-        function blobToBase64(blob) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result.split(',')[1]); // Get base64 part
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }
-
-        // ============================================================================
-        // BACKEND API COMMUNICATION FUNCTIONS
-        // ============================================================================
-        
-        /**
-         * Submit speaking response for evaluation
-         * Backend: POST /speaking/answer (speaking.py:answer)
-         * @param {string} sessionId - Current session identifier
-         * @param {string} itemId - Current task identifier
-         * @param {string} transcript - Speech recognition transcript
-         * @param {Blob} audioBlob - Recorded audio data
-         * @returns {Promise<Object>} Evaluation results with feedback and level adjustment
-         * @throws {Error} If submission fails
-         */
-        async function submitAnswer(sessionId, itemId, transcript, audioBlob){
-            let audioBase64 = null;
-            if (audioBlob) {
-                audioBase64 = await blobToBase64(audioBlob);
-            }
-            const r = await fetch('/speaking/answer', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, item_id: itemId, transcript: transcript, audio_base64: audioBase64 }) });
-            if(!r.ok){
-                const msg = await r.text().catch(() => 'submit failed');
-                throw new Error(msg || 'submit failed');
-            }
-            return await r.json();
-        }
-
-        /**
-         * Get next speaking task in current session
-         * Backend: POST /speaking/next (speaking.py:next_item)
-         * @param {string} sessionId - Current session identifier
-         * @returns {Promise<Object>} Next task data and updated session state
-         * @throws {Error} If request fails
-         */
-        async function fetchNext(sessionId){
-            const r = await fetch('/speaking/next', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId }) });
-            if(!r.ok){
-                const msg = await r.text().catch(() => 'next failed');
-                throw new Error(msg || 'next failed');
-            }
-            return await r.json();
-        }
-
-        // ============================================================================
-        // USER INTERACTION HANDLERS
-        // ============================================================================
-        
-        /**
-         * Toggle recording state (start/stop)
-         * Prevents re-recording and manages UI state transitions
-         */
-        function toggleRecording(){
-            if(hasRecordedThisItem) return;
-            if(!isRecording){
-                if(countdownInterval) clearInterval(countdownInterval);
-                const as = $('autostart'); if (as) hide(as);
-                beginRecording(parseInt($('recordTimer').textContent, 10) || 60);
-            }else{
-                stopRecording();
-            }
-        }
-
-        /**
-         * Show recording UI with instructions
-         * @param {number} recordSeconds - Recording time limit
-         */
-        function showRecordUI(recordSeconds){
-            hide('prep');
-            show('record');
-            $('recordBtn').textContent = 'Start';
-            $('recordBtn').disabled = false;
-            hide('submitBtn');
-            if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
-            const as = $('autostart');
-            if (as) {
-                show(as);
-                as.innerHTML = 'Click <strong>Start</strong> when you are ready to record.';
-            }
-        }
-
-        // ============================================================================
-        // SUBMISSION AND RESPONSE HANDLING
-        // ============================================================================
-        
-        /**
-         * Submit current speaking response for evaluation
-         * Validates transcript and audio data before API submission
-         */
-        async function attemptSubmit(){
-            console.log('attemptSubmit called');
-            if (submitTriggered) return;
-            submitTriggered = true;
-            const text = (transcriptText || '').trim();
-            const cleaned = cleanTranscript(text);
-            console.log('Transcript (cleaned):', cleaned);
-            console.log('Recorded audio blob:', recordedAudioBlob);
-            if (!cleaned) {
-                const warn = $('asrWarning');
-                if (warn) warn.textContent = 'No transcript captured. Please ensure microphone and speech recognition permissions are granted and use a supported browser (Chrome).';
-                console.warn('No transcript captured.');
-            }
-            try{
-                const resp = await submitAnswer($('sessionId').value, $('itemId').value, cleaned, recordedAudioBlob);
-                console.log('submitAnswer response:', resp);
-                handleAnswer(resp);
-            }catch(e){
-                console.error('submitAnswer failed:', e);
-                alert(String(e.message || e));
-            }
-        }
-
-        /**
-         * Process evaluation response from backend
-         * Updates UI with feedback, pronunciation scores, and level progression
-         * @param {Object} resp - Response from speaking/answer endpoint
-         */
-        function handleAnswer(resp){
-            const predicted = resp && resp.predicted_level ? String(resp.predicted_level).toUpperCase() : null;
-            $('status').textContent = predicted ? `Level: ${resp.level} (${resp.progress_current}/${resp.progress_total}) · Estimated: ${predicted}` : `Level: ${resp.level} (${resp.progress_current}/${resp.progress_total})`;
-            $('feedback').textContent = resp.feedback || '';
-            $('pronunciationScore').textContent = resp.pronunciation_score ? `Pronunciation Score: ${resp.pronunciation_score.toFixed(2)}%` : '';
-            $('pronunciationFeedback').textContent = resp.pronunciation_feedback || '';
-            if(resp.finished){
-                $('prompt').textContent = 'Finished!';
-                $('guidance').textContent = '';
-                hide('prep');
-                hide('record');
-                show('nextCard');
-                hide('continueBtn');
-                show('finishSessionBtnContainer');
-                return;
-            }
-            // Hold the next item until user reviews feedback and clicks Continue
-            nextPendingItem = resp.item;
-            const summary = predicted ? `Estimated: ${predicted} · Next level: ${resp.level}` : `Next level: ${resp.level}`;
-            const review = $('review');
-            const reviewSummary = $('reviewSummary');
-            const reviewFeedback = $('reviewFeedback');
-            const reviewPronunciationScore = $('reviewPronunciationScore');
-            const reviewPronunciationFeedback = $('reviewPronunciationFeedback');
-            if (reviewSummary) reviewSummary.textContent = summary;
-            if (reviewFeedback) reviewFeedback.textContent = resp.feedback || '';
-            if (reviewPronunciationScore) reviewPronunciationScore.textContent = resp.pronunciation_score ? `Pronunciation Score: ${resp.pronunciation_score.toFixed(2)}%` : '';
-            if (reviewPronunciationFeedback) reviewPronunciationFeedback.textContent = resp.pronunciation_feedback || '';
-            show(review);
-            hide('prep');
-            hide('record');
-            show('nextCard');
-        }
-
-        // ============================================================================
-        // AUTHENTICATION STATE MANAGEMENT
-        // ============================================================================
-        
-        /**
-         * Update authentication status display in UI
-         * Shows login state and manages login/logout link visibility
-         */
-        function updateAuthHeader(){
-            const st = $('authState');
-            const link = $('loginLink');
-            if (!st) return;
-            if (token) {
-                st.textContent = username ? `Logged in as ${username}` : 'Logged in';
-                if (link) hide(link);
-            } else {
-                st.textContent = 'Logged out';
-                if (link) show(link);
-            }
-        }
-
-        /**
-         * Validate current JWT token with backend
-         * Backend: GET /auth/me (auth.py:get_current_user)
-         * @returns {Promise<boolean>} True if token is valid
-         */
-        async function validateToken(){
-            if (!token) return false;
-            try{
-                const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
-                if (!r.ok) throw new Error('invalid');
-                const u = await r.json().catch(() => null);
-                if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
-                return true;
-            }catch(_){
-                try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
-                token = null; username = null;
-                return false;
-            }
-        }
-
-        // ============================================================================
-        // APPLICATION INITIALIZATION AND EVENT HANDLERS
-        // ============================================================================
-        
-        /**
-         * Initialize application on page load
-         * Sets up authentication state and event listeners
-         */
-        window.addEventListener('DOMContentLoaded', async () => {
-            const ok = await validateToken();
-            if (ok) {
-                show('module');
-                updateAuthHeader();
-                const lc = document.getElementById('login-card'); if (lc) hide(lc);
-            } else {
-                const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
-                if (st) { st.textContent = 'Logged out'; }
-                if (link) { show(link); }
-                const lc = document.getElementById('login-card'); if (lc) show(lc);
-            }
-            // Login button event handler
-            $('loginBtn').addEventListener('click', async () => {
-                $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
-                try{
-                    token = await login($('username').value, $('password').value);
-                    username = $('username').value || null;
-                    $('loginMsg').textContent = username ? `Logged in as ${username}` : 'Logged in';
-                    show('module');
-                    updateAuthHeader();
-                    const lc = document.getElementById('login-card'); if (lc) hide(lc);
-                }catch(e){
-                    $('loginMsg').textContent = 'Login failed';
-                }finally{
-                    $('loginBtn').disabled = false;
-                }
-            });
-
-            // Start session button event handler
-            $('startBtn').addEventListener('click', async () => {
-                $('startBtn').disabled = true; $('status').textContent = 'Starting…';
-                let sessionInitialized = false;
-                try{
-                    // revalidate token before starting
-                    const ok = await validateToken();
-                    if (!ok) throw new Error('Please log in');
-                    const micOk = await ensureMicrophonePermission();
-                    if (!micOk) {
-                        $('status').textContent = 'Microphone permission required.';
-                        return;
-                    }
-                    session = await startSession();
-                    sessionInitialized = true;
-                    $('status').textContent = `Level: ${session.level} (${session.progress_current}/${session.progress_total})`;
-                    $('prompt').textContent = session.item.prompt;
-                    $('guidance').textContent = session.item.guidance || '';
-                    $('audioPlayback').src = '';
-                    $('feedback').textContent = '';
-                    $('pronunciationScore').textContent = '';
-                    $('pronunciationFeedback').textContent = '';
-                    $('recordBtn').onclick = toggleRecording;
-                    hide('nextCard');
-                    const sub = $('submitBtn'); if (sub) { hide(sub); sub.disabled = false; }
-                    await startPrepAndRecord(session.item.prep_seconds, session.item.record_seconds);
-                    $('sessionId').value = session.session_id;
-                    $('itemId').value = session.item.id;
-                    const continueBtn = $('continueBtn'); if (continueBtn) show(continueBtn);
-                    const finishBtnContainer = $('finishSessionBtnContainer'); if (finishBtnContainer) hide(finishBtnContainer);
-                }catch(e){
-                    console.error('Start session failed:', e);
-                    if (String(e.message || e).includes('401')) {
-                        try { localStorage.removeItem('token'); } catch(_) {}
-                        try { localStorage.removeItem('username'); } catch(_) {}
-                        token = null; username = null;
-                        const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
-                        if (st) { st.textContent = 'Logged out'; }
-                        if (link) { show(link); }
-                        const lc = document.getElementById('login-card'); if (lc) show(lc);
-                        $('status').textContent = 'Please log in';
-                    } else if (!sessionInitialized) {
-                        $('status').textContent = 'Failed to start session';
-                    } else {
-                        const level = session && session.level ? session.level : 'Session';
-                        $('status').textContent = `Ready — ${level} active`;
-                        console.warn('Session started with follow-up issue:', e);
-                    }
-                }finally{
-                    $('startBtn').disabled = false;
-                }
-            });
-
-            // Skip preparation button event handler
-            const skipBtn = document.getElementById('skipPrepBtn');
-            if (skipBtn) {
-                skipBtn.addEventListener('click', () => {
-                    if(countdownInterval) clearInterval(countdownInterval);
-                    showRecordUI(parseInt($('recordTimer').textContent, 10) || 60);
-                });
-            }
-
-            // Submit answer button event handler
-            const submitBtn = document.getElementById('submitBtn');
-            if (submitBtn) {
-                submitBtn.addEventListener('click', async () => {
-                    submitBtn.disabled = true;
-                    try { await attemptSubmit(); } finally { submitBtn.disabled = false; }
-                });
-            }
-
-            // Continue to next task button event handler
-            const continueBtn = document.getElementById('continueBtn');
-            if (continueBtn) {
-                continueBtn.addEventListener('click', async () => {
-                    try{
-                        const next = await fetchNext($('sessionId').value);
-                        $('status').textContent = `Level: ${next.level} (${next.progress_current}/${next.progress_total})`;
-                        const item = next.item;
-                        $('prompt').textContent = item.prompt;
-                        $('guidance').textContent = item.guidance || '';
-                        $('audioPlayback').src = '';
-                        $('sessionId').value = next.session_id;
-                        $('itemId').value = item.id;
-                        hide('review');
-                        hide('nextCard');
-                        show('continueBtn');
-                        hide('finishSessionBtnContainer');
-                        startPrepAndRecord(item.prep_seconds, item.record_seconds);
-                        const sub = $('submitBtn'); if (sub) { hide(sub); sub.disabled = false; }
-                    }catch(e){
-                        alert(String(e.message || e));
-                    }
-                });
-            }
-        });
-    </script>
+    
+    <!-- Shared CSS -->
+    <link rel="stylesheet" href="../shared/css/base.css">
+    <link rel="stylesheet" href="../shared/css/components.css">
+    <!-- Module-specific CSS -->
+    <link rel="stylesheet" href="styles.css">
+    <!-- Shared JavaScript -->
+    <script src="../shared/js/auth.js?v=20251009"></script>
+    <script src="../shared/js/api.js?v=20251009"></script>
+    <!-- Module-specific JavaScript -->
+    <script src="speaking.js?v=20251009"></script>
     </head>
 <body>
-    <!--
-    HTML STRUCTURE DOCUMENTATION
-    ============================
-    
-    This HTML implements a complete speaking assessment interface with the following sections:
-    
-    1. HEADER: Navigation and authentication status
-    2. LOGIN CARD: User authentication form (guest/any for testing)
-    3. MODULE CARD: Main speaking assessment interface
-       - Session status and progress display
-       - Speaking prompt and guidance
-       - Preparation phase with countdown timer
-       - Recording phase with audio controls
-       - Real-time transcript display
-       - Feedback and pronunciation assessment
-    4. REVIEW CARD: Answer review and feedback display
-    5. NEXT CARD: Navigation to next task or session completion
-    
-    UI STATE MANAGEMENT:
-    - Elements are shown/hidden using CSS classes
-    - State transitions: prep → record → review → next
-    - Real-time updates for timers, transcripts, and feedback
-    - Error handling and user guidance throughout
-    -->
     <div class="container">
+        <!-- Header with navigation and auth state -->
         <div class="header">
-            <h2>Speaking (Adaptive)</h2>
-            <div class="small"><a href="/app/">Home</a> · <span id="authState">Logged out</span> <a href="/app/" id="loginLink">Login</a></div>
+            <h1>Speaking Assessment (Adaptive)</h1>
+            <div class="small">
+                <a href="/app">Home</a> · 
+                <span id="authState">Logged out</span> 
+                <a href="/app" id="loginLink">Login</a>
+            </div>
         </div>
+
+        <!-- Back navigation card -->
         <div class="card">
             <button onclick="window.location.href = '/app/';">← Back</button>
         </div>
-        <div class="card" id="login-card">
-            <h3>Login</h3>
+
+        <div id="status" class="small"></div>
+
+        <!-- Login Form -->
+        <div id="login-card" class="card">
+            <h2>Login</h2>
+            <form id="loginForm">
             <div class="row">
                 <div>
-                    <label>Username</label>
-                    <input id="username" placeholder="username" value="guest" />
+                        <label for="username">Username</label>
+                        <input id="username" type="text" placeholder="username" value="guest" required>
+                    </div>
+                    <div>
+                        <label for="password">Password</label>
+                        <input id="password" type="password" placeholder="password" value="any" required>
+                    </div>
                 </div>
-                <div>
-                    <label>Password</label>
-                    <input id="password" type="password" placeholder="password" value="any" />
+                <div style="margin-top:12px">
+                    <button type="submit">Login</button>
                 </div>
+            </form>
+        </div>
+
+        <!-- Main Interface -->
+        <div id="session-card" class="hidden">
+            <div class="card">
+                <h2>Speaking Assessment</h2>
+                <p>This assessment will evaluate your speaking skills through various tasks.</p>
+                <p>You will have preparation time before each recording, and the system will provide real-time feedback.</p>
+                
+                <div class="level-indicator">
+                    <span>Starting Level:</span>
+                    <span class="level-badge">A2</span>
             </div>
-            <div style="margin-top:12px">
-                <button id="loginBtn">Login</button>
-                <span id="loginMsg" class="small" style="margin-left:8px"></span>
+                
+                <button id="startBtn">Start Speaking Assessment</button>
             </div>
         </div>
 
-        <div id="module" class="card hidden">
-            <div class="row" style="justify-content: space-between;">
-                <div id="status" class="small">Not started</div>
-                <button id="startBtn">Start Session</button>
+        <!-- Task Interface -->
+        <div id="taskInterface" class="hidden">
+            <div class="card">
+                <div class="speaking-progress">
+                    <span class="progress-text">Task Progress</span>
+                    <span id="taskProgress">1/5</span>
             </div>
 
-            <div style="margin-top:12px">
-                <div class="small">Prompt</div>
-                <div id="prompt" style="margin-top:6px"></div>
-                <div id="guidance" class="small" style="margin-top:8px"></div>
+                <div class="speaking-prompt">
+                    <div class="prompt-title">Speaking Task</div>
+                    <div id="promptText" class="prompt-text"></div>
+                    <div id="promptInstructions" class="prompt-instructions"></div>
             </div>
 
-            <div id="prep" class="hidden" style="margin-top:12px;">
-                <div>Preparation… <span class="timer" id="prepTimer">30</span>s</div>
-                <div class="row" style="margin-top:8px">
-                    <button id="skipPrepBtn">Skip to recording</button>
+                <!-- Preparation Phase -->
+                <div id="prep" class="hidden">
+                    <div class="timer-display preparation">
+                        <div>Preparation Time</div>
+                        <div id="prepTimer" class="timer">30</div>
+                    </div>
+                    <p>Prepare your response. Recording will start automatically.</p>
                 </div>
+
+                <!-- Recording Phase -->
+                <div id="record" class="hidden">
+                    <div class="timer-display recording">
+                        <div>Recording Time</div>
+                        <div id="recordTimer" class="timer">60</div>
             </div>
 
-            <div id="record" class="hidden" style="margin-top:12px;">
-                <div>Recording… <span class="timer" id="recordTimer">60</span>s</div>
-                <div id="autostart" class="small hidden" style="margin-top:4px;">Click <strong>Start</strong> when you are ready to record.</div>
-                <div id="asrWarning" class="small" style="margin-top:4px"></div>
-                <div class="row" style="margin-top:8px">
+                    <div class="recording-controls">
                     <button id="recordBtn">Start</button>
-                    <button id="submitBtn" class="hidden">Submit</button>
+                        <div class="recording-status">
+                            <div class="recording-dot"></div>
+                            <span>Recording...</span>
+                        </div>
+                    </div>
+                    
+                    <div class="audio-visualizer" id="audioVisualizer">
+                        <!-- Audio visualization bars will be added dynamically -->
+                    </div>
+                    
+                    <div class="transcript-display">
+                        <div>Live Transcript:</div>
+                        <div id="transcript"></div>
+                    </div>
+                    
+                    <audio id="audioPlayback" controls class="hidden"></audio>
                 </div>
-                <audio id="audioPlayback" controls></audio>
-                <div class="small" style="margin-top:8px">Transcript</div>
-                <div id="transcript" class="small" style="min-height:20px; margin-top:4px; white-space: pre-wrap; padding: 8px; background: #0a0f1f; border: 1px solid #1e2a55; border-radius: 8px;"></div>
-                <div class="small" style="margin-top:8px">Feedback</div>
-                <div id="feedback" class="small" style="min-height:20px; margin-top:4px"></div>
-                <div class="small" style="margin-top:8px">Pronunciation (auto)</div>
-                <div id="pronunciationScore" class="small" style="min-height:20px; margin-top:4px"></div>
-                <div id="pronunciationFeedback" class="small" style="min-height:20px; margin-top:4px"></div>
-                <input id="sessionId" type="hidden" />
-                <input id="itemId" type="hidden" />
+
+                <div id="asrWarning" class="small" style="color: #fbbf24; margin-top: 8px;"></div>
+            </div>
+        </div>
+
+        <!-- Results Display -->
+        <div id="results" class="hidden">
+            <!-- Evaluation results will be displayed here -->
+        </div>
+
+        <!-- Hidden form for submission -->
+        <div class="hidden">
+            <input id="itemId" type="hidden" />
             </div>
 
             <div id="review" class="hidden" style="margin-top:12px;">
@@ -820,7 +181,7 @@
                 <div class="small" style="margin-top:8px">Pronunciation Feedback</div>
                 <div id="reviewPronunciationFeedback" class="small" style="min-height:20px; margin-top:4px"></div>
             </div>
-        </div>
+        
         <div class="card hidden" id="nextCard" style="margin-top:12px;">
             <div class="row" style="justify-content:flex-end">
                 <button id="continueBtn">Next Assignment</button>

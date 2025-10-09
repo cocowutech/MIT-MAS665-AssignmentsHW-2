@@ -1,4 +1,6 @@
-"""Speaking Assessment Module
+"""
+Speaking Assessment Module
+==========================
 
 This module provides adaptive speaking assessment functionality for the English
 placement test. It generates speaking tasks at appropriate CEFR levels, evaluates
@@ -20,6 +22,9 @@ API Endpoints:
 - POST /speaking/start: Begin new assessment session
 - POST /speaking/answer: Submit speaking response for evaluation
 - POST /speaking/next: Get next task in current session
+
+Author: ESL Assessment System
+Version: 1.0
 """
 
 from __future__ import annotations
@@ -43,12 +48,27 @@ from .auth import User, get_current_user
 
 router = APIRouter(prefix="/speaking", tags=["speaking"])
 
+# ============================================================================
+# CONSTANTS AND CONFIGURATION
+# ============================================================================
 
+# CEFR levels supported by the speaking assessment
 LEVELS: List[str] = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
+# Global session storage - Might not be relevant anymore (consider using Redis or database for production)
+_sessions: Dict[str, Dict[str, Any]] = {}
+
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
 
 def level_to_exam(level: str) -> str:
-	"""Map CEFR levels to Cambridge exam targets.
+	"""
+	Map CEFR levels to Cambridge exam targets.
+	
+	This function provides alignment between CEFR levels and Cambridge English
+	examinations for better assessment context and reporting.
 	
 	Args:
 		level: CEFR level (A1, A2, B1, B2, C1, C2)
@@ -63,7 +83,17 @@ def level_to_exam(level: str) -> str:
 	return "FCE"
 
 
+# ============================================================================
+# REQUEST/RESPONSE MODELS
+# ============================================================================
+
 class SpeakingItem(BaseModel):
+	"""
+	Speaking task item model.
+	
+	Represents a single speaking task with its prompt, instructions,
+	and timing requirements.
+	"""
 	id: str
 	cefr: str
 	exam_target: str
@@ -74,10 +104,16 @@ class SpeakingItem(BaseModel):
 
 
 class StartRequest(BaseModel):
+	"""
+	Request model for starting a new speaking session.
+	"""
 	start_level: Optional[str] = Field(default=None, description="Initial CEFR level A1–C2 (default A2)")
 
 
 class StartResponse(BaseModel):
+	"""
+	Response model for session start containing first task.
+	"""
 	session_id: str
 	item: SpeakingItem
 	progress_current: int
@@ -86,6 +122,12 @@ class StartResponse(BaseModel):
 
 
 class AnswerRequest(BaseModel):
+	"""
+	Request model for submitting speaking answers.
+	
+	Note: Client should POST recorded audio as base64 or URL in future; 
+	for MVP we accept self-score bool.
+	"""
 	session_id: str
 	item_id: str
 	# Client should POST recorded audio as base64 or URL in future; for MVP we accept self-score bool
@@ -96,6 +138,9 @@ class AnswerRequest(BaseModel):
 
 
 class AnswerResponse(BaseModel):
+	"""
+	Response model for speaking answer evaluation.
+	"""
 	correct: bool
 	level: str
 	progress_current: int
@@ -108,8 +153,13 @@ class AnswerResponse(BaseModel):
 	pronunciation_feedback: Optional[str] = None
 
 
+# ============================================================================
+# SESSION MANAGEMENT
+# ============================================================================
+
 class _SessionState:
-	"""Internal session state for tracking speaking assessment progress.
+	"""
+	Internal session state for tracking speaking assessment progress.
 	
 	Manages the adaptive assessment session including current difficulty level,
 	progress tracking, and performance history. Used internally by the speaking
@@ -567,6 +617,10 @@ async def _assess_pronunciation(audio_base64: str, expected_transcript: str) -> 
 	except Exception as e:
 		return {"pronunciation_score": None, "pronunciation_feedback": f"Pronunciation assessment failed: {e}"}
 
+
+# ============================================================================
+# API ENDPOINTS
+# ============================================================================
 
 @router.post("/start", response_model=StartResponse)
 async def start(req: StartRequest, user: User = Depends(get_current_user)):

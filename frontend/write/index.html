@@ -4,354 +4,140 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Writing Task</title>
-	<style>
-		body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
-		.container { max-width: 920px; margin: 0 auto; padding: 24px; }
-		.card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 20px; margin-top: 16px; }
-		label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c7d2fe; }
-		input, textarea, select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
-		button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
-		button:disabled { opacity: 0.6; cursor: not-allowed; }
-		.row { display: flex; gap: 12px; align-items: center; }
-		.row > * { flex: 1; }
-		.small { color: #93c5fd; font-size: 12px; }
-		pre { white-space: pre-wrap; word-break: break-word; background: #0a0f1f; border: 1px solid #1e2a55; padding: 12px; border-radius: 8px; }
-		a { color: #93c5fd; }
-		.inline-annot { background: #062b2b; border-left: 3px solid #0ea5e9; padding: 6px 8px; margin: 6px 0; }
-		/* Prompt box enhancements */
-		.prompt-box { background: #0a0f1f; border: 1px solid #22305f; border-radius: 12px; padding: 16px; }
-		.prompt-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-		.prompt-title { font-size: 16px; font-weight: 600; }
-		.meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-		.meta-item { background: #0f1a39; border: 1px solid #2a3a76; color: #c7d2fe; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
-		.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-		.chip { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #0b1837; border: 1px solid #1e2a55; color: #93c5fd; font-size: 12px; }
-		.chip.struct { color: #a7f3d0; border-color: #115e59; background: #062b2b; }
-		.section-title { font-weight: 600; color: #c7d2fe; margin-top: 12px; margin-bottom: 6px; font-size: 13px; }
-		.prompt-body p { margin: 6px 0; }
-		.prompt-body ul, .prompt-body ol { margin: 6px 0 6px 20px; }
-		.small-btn { background: #0f172a; border: 1px solid #334155; color: #e5e7eb; padding: 6px 10px; border-radius: 8px; font-size: 12px; }
-
-		/* Scoring result enhancements */
-		.score-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid #1e2a55; }
-		.score-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 8px; }
-		.score-item { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; }
-		.score-label { font-size: 12px; color: #93c5fd; margin-bottom: 4px; }
-		.score-value { font-size: 16px; font-weight: 600; color: #e5e7eb; }
-		.comment-box { background: #0a0f1f; border: 1px solid #22305f; border-radius: 8px; padding: 12px; margin-top: 8px; }
-		.inline-annot { background: #062b2b; border-left: 3px solid #0ea5e9; padding: 6px 8px; margin: 6px 0; }
-	</style>
+    <!--
+    WRITING MODULE FRONTEND DOCUMENTATION
+    =====================================
+    
+    This file implements the frontend interface for the adaptive writing assessment module.
+    It provides a complete writing evaluation system with text input, adaptive difficulty,
+    and real-time feedback integration with the backend API.
+    
+    BACKEND API INTEGRATION:
+    - POST /auth/token: User authentication
+    - POST /write/start: Initialize new writing session
+    - POST /write/submit: Submit writing response for evaluation
+    - POST /write/next: Get next prompt in current session
+    - GET /auth/me: Validate current user token
+    
+    KEY FEATURES:
+    - Adaptive difficulty progression based on performance
+    - Text input with word count tracking
+    - Writing comprehension assessment
+    - Session management with progress tracking
+    - Guest user support for testing
+    
+    BROWSER COMPATIBILITY:
+    - Modern browsers with ES2020 support
+    - Responsive design for mobile and desktop
+    
+    WORKFLOW:
+    1. User logs in (guest/any for testing)
+    2. Starts writing session with initial CEFR level
+    3. Reads prompt and writes response
+    4. Submits response for evaluation
+    5. Receives feedback and adaptive level adjustment
+    6. Continues to next prompt or finishes session
+    -->
+    
+    <!-- Shared CSS -->
+    <link rel="stylesheet" href="../shared/css/base.css">
+    <link rel="stylesheet" href="../shared/css/components.css">
+    <!-- Module-specific CSS -->
+    <link rel="stylesheet" href="styles.css">
+    <!-- Shared JavaScript -->
+    <script src="../shared/js/auth.js?v=20251009"></script>
+    <script src="../shared/js/api.js?v=20251009"></script>
+    <!-- Module-specific JavaScript -->
+    <script src="write.js?v=20251009"></script>
 </head>
 <body>
 	<div class="container">
-		<div style="display:flex; justify-content: space-between; align-items: center;">
-			<h2>Writing Task</h2>
-			<div class="small"><a href="/app" class="small">Home</a> · <span id="authState">Logged out</span> <a href="/app" id="loginLink" class="small">Login</a></div>
+        <!-- Header with navigation and auth state -->
+        <div class="header">
+            <h1>Writing Task</h1>
+            <div class="small">
+                <a href="/app">Home</a> · 
+                <span id="authState">Logged out</span> 
+                <a href="/app" id="loginLink">Login</a>
+            </div>
 		</div>
 
+        <!-- Back navigation card -->
 		<div class="card">
 			<button onclick="window.location.href = '/app/';">← Back</button>
 		</div>
 
-		<div class="card" id="auth-card">
-			<h3>Authenticate</h3>
+        <div id="status" class="small"></div>
+
+        <!-- Login Form -->
+        <div id="login-card" class="card">
+            <h2>Login</h2>
+            <form id="loginForm">
 			<div class="row">
 				<div>
-					<label>Username</label>
-					<input id="username" placeholder="username" value="guest" />
+                        <label for="username">Username</label>
+                        <input id="username" type="text" placeholder="username" value="guest" required>
 				</div>
 				<div>
-					<label>Password</label>
-					<input id="password" type="password" placeholder="password" value="any" />
+                        <label for="password">Password</label>
+                        <input id="password" type="password" placeholder="password" value="any" required>
 				</div>
 			</div>
 			<div style="margin-top:12px">
-				<button id="loginBtn">Login</button>
-				<span id="loginMsg" class="small" style="margin-left:8px"></span>
+                    <button type="submit">Login</button>
+			</div>
+            </form>
+		</div>
+
+        <!-- Main Interface -->
+        <div id="session-card" class="hidden">
+            <div class="card">
+                <h2>Writing Assessment</h2>
+                <p>This assessment will evaluate your writing skills through various prompts and tasks.</p>
+                <p>You will be given writing prompts and asked to compose responses. The difficulty will adjust based on your performance.</p>
+                
+                <div class="writing-level">
+                    <span>Starting Level:</span>
+                    <span class="level-badge">A2</span>
+			</div>
+                
+                <button id="startBtn">Start Writing Assessment</button>
 			</div>
 		</div>
 
-		<div class="card" id="prompt-card" style="display:none">
-			<h3>Prompt</h3>
-			<div style="margin-top:12px">
-				<button id="genPromptBtn">Generate Prompt</button>
+        <!-- Assessment Interface -->
+        <div id="assessment-interface" class="hidden">
+            <!-- Progress Display -->
+            <div id="progress" class="hidden">
+                <!-- Progress will be populated by JavaScript -->
 			</div>
-			<div style="margin-top:12px">
-				<label>Prompt</label>
-				<div id="promptNice" class="prompt-box" style="display:none"></div>
-				<pre id="promptOut" style="display:none"></pre>
-			</div>
+
+            <!-- Writing Prompt -->
+            <div id="prompt" class="hidden">
+                <!-- Prompt will be populated by JavaScript -->
 		</div>
 
-		<div class="card" id="write-card" style="display:none">
-			<h3>Write or Upload</h3>
-			<label>Your Writing</label>
-			<textarea id="essay" rows="8" placeholder="Type your response here or upload an image below..."></textarea>
-			<div class="row" style="margin-top:12px">
-				<button id="scoreTextBtn">Score Text</button>
-				<input type="file" id="imageFile" accept="image/*" />
-				<button id="scoreImageBtn">OCR + Score Image</button>
-			</div>
+            <!-- Writing Editor -->
+            <div id="editor" class="hidden">
+                <!-- Editor will be populated by JavaScript -->
 		</div>
 
-		<div class="card" id="result-card" style="display:none">
-			<h3>Result</h3>
-			<div id="bandOut" class="small"></div>
-			<pre id="resultOut"></pre>
-			<div id="inlineOut"></div>
-		</div>
+            <!-- Submit Button -->
+            <div class="card">
+                <button id="submitBtn">Submit Writing</button>
 	</div>
 
-	<script>
-	const $ = (id) => document.getElementById(id);
-	let token = localStorage.getItem('token');
-	let username = localStorage.getItem('username');
-	async function validateToken(){
-		if (!token) return false;
-		try{
-			const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
-			if (!r.ok) throw new Error('invalid');
-			const u = await r.json().catch(() => null);
-			if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
-			return true;
-		}catch(_){
-			try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
-			token = null; username = null;
-			return false;
-		}
-	}
-	let lastBand = 'B1';
-
-	function escapeHTML(str) {
-		return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s]));
-	}
-
-		function recommendedWordRange() { return 'around 350 words'; }
-
-	function formatPromptHTML(text) {
-		const lines = String(text || '').split(/\r?\n/);
-		let html = '';
-		let listType = null; // 'ul' | 'ol' | null
-		for (const raw of lines) {
-			const line = raw.trim();
-			if (line === '') {
-				if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; listType = null; }
-				html += '<br/>';
-				continue;
-			}
-			if (/^\d+\./.test(line)) {
-				if (listType !== 'ol') { if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; } html += '<ol>'; listType = 'ol'; }
-				html += `<li>${escapeHTML(line.replace(/^\d+\.\s*/, ''))}</li>`;
-				continue;
-			}
-			if (/^[-•\u2022]/.test(line)) {
-				if (listType !== 'ul') { if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; } html += '<ul>'; listType = 'ul'; }
-				html += `<li>${escapeHTML(line.replace(/^[-•\u2022]\s*/, ''))}</li>`;
-				continue;
-			}
-			if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; listType = null; }
-			html += `<p>${escapeHTML(line)}</p>`;
-		}
-		if (listType) { html += listType === 'ol' ? '</ol>' : '</ul>'; }
-		return html;
-	}
-
-	function cleanPromptText(raw) {
-		let s = String(raw || '');
-		// Remove triple backtick code fences like ```json ... ```
-		s = s.replace(/```[a-zA-Z]*\s*/gi, '').replace(/```/g, '');
-		// Try to parse JSON and extract the prompt value
-		try {
-			const obj = JSON.parse(s);
-			if (obj && typeof obj === 'object' && obj.prompt) {
-				s = String(obj.prompt);
-			}
-		} catch (_) {
-			// Fallback: regex to capture "prompt": "..."
-			const m = s.match(/"prompt"\s*:\s*"([\s\S]*?)"/i);
-			if (m) {
-				s = m[1].replace(/\\"/g, '"');
-			}
-		}
-		// Remove any leftover curly braces
-		s = s.replace(/[{}]/g, '');
-		return s.trim();
-	}
-
-	function renderPromptBox(data) {
-		const promptText = cleanPromptText(data && data.prompt ? data.prompt : 'Prompt not available');
-			const words = recommendedWordRange();
-			$('promptNice').innerHTML = `
-				<div class="prompt-header">
-					<div>
-						<div class="prompt-title">Your Writing Prompt</div>
-						<div class="meta">
-							<span class="meta-item">Aim: ${escapeHTML(words)}</span>
+            <!-- Continue Button -->
+            <div class="card hidden" id="continueBtn">
+                <button onclick="continueToNext()">Continue to Next Prompt</button>
 						</div>
 					</div>
-					<button class="small-btn" id="copyPromptBtn">Copy</button>
+
+        <!-- Results Display -->
+        <div id="results" class="hidden">
+            <!-- Results will be populated by JavaScript -->
 				</div>
-				<div class="prompt-body">${formatPromptHTML(promptText)}</div>
-				<div class="section-title">Instructions</div>
-				<ul class="small">
-					<li>Write about 350 words.</li>
-					<li>Organize into clear paragraphs and use linking words.</li>
-					<li>Use varied vocabulary and structures where possible.</li>
-					<li>Check grammar, spelling, and punctuation before submitting.</li>
-				</ul>
-			`;
-			$('promptNice').style.display = 'block';
-			const copyBtn = document.getElementById('copyPromptBtn');
-			if (copyBtn && navigator && navigator.clipboard) {
-				copyBtn.onclick = () => navigator.clipboard.writeText(promptText);
-			}
-		}
 
-	function updateAuthHeader(){
-		const st = document.getElementById('authState'); const link = document.getElementById('loginLink');
-		if (!st) return;
-		if (token) { st.textContent = username ? `Logged in as ${username}` : 'Logged in'; if (link) link.style.display='none'; }
-		else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
-	}
-
-	(async () => {
-		const ok = await validateToken();
-		if (ok) {
-			$('auth-card').style.display = 'none';
-			$('prompt-card').style.display = 'block';
-			$('write-card').style.display = 'block';
-			updateAuthHeader();
-		} else {
-			$('auth-card').style.display = 'block';
-			$('prompt-card').style.display = 'none';
-			$('write-card').style.display = 'none';
-			updateAuthHeader();
-		}
-	})();
-	$('loginBtn').addEventListener('click', async () => {
-		$('loginBtn').disabled = true; $('loginMsg').textContent = '…';
-		try {
-			const form = new URLSearchParams();
-			form.set('username', $('username').value);
-			form.set('password', $('password').value);
-			const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
-			if (!r.ok) throw new Error('login failed');
-			const j = await r.json();
-			token = j.access_token; username = $('username').value || null;
-			try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch(_) {}
-			$('loginMsg').textContent = 'Logged in';
-			$('prompt-card').style.display = 'block';
-			$('write-card').style.display = 'block';
-			updateAuthHeader();
-		} catch (e) {
-			$('loginMsg').textContent = 'Login failed';
-		} finally {
-			$('loginBtn').disabled = false;
-		}
-	});
-
-		$('genPromptBtn').addEventListener('click', async () => {
-		$('genPromptBtn').disabled = true;
-		$('promptNice').style.display = 'block';
-		$('promptNice').innerHTML = '<div class="small">Generating prompt…</div>';
-		$('promptOut').style.display = 'none';
-		try {
-				const r = await fetch('/write/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({}) });
-			const j = await r.json();
-			renderPromptBox(j);
-		} catch (e) {
-			$('promptNice').innerHTML = `<div class="small">Failed to generate prompt: ${escapeHTML(String(e))}</div>`;
-		} finally {
-			$('genPromptBtn').disabled = false;
-		}
-	});
-
-		$('scoreTextBtn').addEventListener('click', async () => {
-		$('scoreTextBtn').disabled = true; $('result-card').style.display = 'block'; $('resultOut').innerHTML = '…'; $('inlineOut').innerHTML = '';
-		try {
-				const r = await fetch('/write/score/text', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ text: $('essay').value }) });
-				if (!r.ok) {
-					const errorData = await r.json();
-					throw new Error(errorData.detail || `Server error: ${r.status}`);
-				}
-			const j = await r.json();
-				if (j.band) $('bandOut').textContent = `Band estimate: ${j.band}`; else $('bandOut').textContent = '';
-
-				let resultHtml = '';
-				if (j.overall !== undefined) {
-					resultHtml += `<div class="score-section"><div class="section-title">Overall Score</div><div class="score-item"><div class="score-value">${j.overall.toFixed(1)}</div></div></div>`;
-				}
-				if (j.scores) {
-					resultHtml += `<div class="score-section"><div class="section-title">Detailed Scores</div><div class="score-grid">`;
-					for (const key in j.scores) {
-						resultHtml += `<div class="score-item"><div class="score-label">${escapeHTML(key.replace(/_/g, ' '))}</div><div class="score-value">${j.scores[key].toFixed(1)}</div></div>`;
-					}
-					resultHtml += `</div></div>`;
-				}
-				if (j.comments && j.comments.global) {
-					resultHtml += `<div class="score-section"><div class="section-title">Global Comments</div><div class="comment-box">${escapeHTML(j.comments.global)}</div></div>`;
-				}
-				$('resultOut').innerHTML = resultHtml;
-
-				if (j.comments && Array.isArray(j.comments.inline)) {
-				$('inlineOut').innerHTML = j.comments.inline.map(a => `<div class="inline-annot"><strong>${escapeHTML(a.span||'')}</strong><div class="small">${escapeHTML(a.comment||'')}</div></div>`).join('');
-			}
-		} catch (e) {
-			$('resultOut').textContent = String(e);
-		} finally {
-			$('scoreTextBtn').disabled = false;
-		}
-	});
-
-		$('scoreImageBtn').addEventListener('click', async () => {
-		const f = $('imageFile').files[0];
-		if (!f) { alert('Choose an image first'); return; }
-		$('scoreImageBtn').disabled = true; $('result-card').style.display = 'block'; $('resultOut').innerHTML = '…'; $('inlineOut').innerHTML = '';
-		try {
-			const form = new FormData();
-			form.append('file', f);
-				const r = await fetch('/write/score/image', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form });
-				if (!r.ok) {
-					const errorData = await r.json();
-					throw new Error(errorData.detail || `Server error: ${r.status}`);
-				}
-			const j = await r.json();
-				if (j.band) $('bandOut').textContent = `Band estimate: ${j.band}`; else $('bandOut').textContent = '';
-
-				let resultHtml = '';
-				if (j.overall !== undefined) {
-					resultHtml += `<div class="score-section"><div class="section-title">Overall Score</div><div class="score-item"><div class="score-value">${j.overall.toFixed(1)}</div></div></div>`;
-				}
-				if (j.scores) {
-					resultHtml += `<div class="score-section"><div class="section-title">Detailed Scores</div><div class="score-grid">`;
-					for (const key in j.scores) {
-						resultHtml += `<div class="score-item"><div class="score-label">${escapeHTML(key.replace(/_/g, ' '))}</div><div class="score-value">${j.scores[key].toFixed(1)}</div></div>`;
-					}
-					resultHtml += `</div></div>`;
-				}
-				if (j.comments && j.comments.global) {
-					resultHtml += `<div class="score-section"><div class="section-title">Global Comments</div><div class="comment-box">${escapeHTML(j.comments.global)}</div></div>`;
-				}
-				$('resultOut').innerHTML = resultHtml;
-
-				if (j.comments && Array.isArray(j.comments.inline)) {
-				$('inlineOut').innerHTML = j.comments.inline.map(a => `<div class="inline-annot"><strong>${escapeHTML(a.span||'')}</strong><div class="small">${escapeHTML(a.comment||'')}</div></div>`).join('');
-			}
-		} catch (e) {
-			let errorMsg = String(e);
-			try {
-				const errorJson = JSON.parse(e.message.substring(e.message.indexOf('{')));
-				if (errorJson && errorJson.detail) {
-					errorMsg = errorJson.detail;
-				}
-			} catch (_) { /* ignore */ }
-			$('resultOut').textContent = `Error: ${errorMsg}`;
-		} finally {
-			$('scoreImageBtn').disabled = false;
-		}
-	});
-	</script>
+    </div>
 </body>
 </html>
-
-

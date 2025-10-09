@@ -4,539 +4,87 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Listening Module</title>
-    <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 0; padding: 0; background: #0b1020; color: #f2f4f8; }
-        .container { max-width: 900px; margin: 0 auto; padding: 24px; }
-        .card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 20px; margin-top: 16px; }
-        label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c7d2fe; }
-        input, select, textarea { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; }
-        button { background: #2563eb; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
-        button.secondary { background: #334155; }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .row { display: flex; gap: 12px; align-items: center; }
-        .row > * { flex: 1; }
-        /* Session row layout tweaks to center the selector and button nicely */
-        .session-row { justify-content: center; }
-        .session-row > * { flex: 0 0 auto; }
-        .session-row > div:first-child { display:flex; flex-direction:column; align-items:center; }
-        /* Center the selected text in the CEFR dropdown and set a compact width */
-        #level { width: 180px; text-align: center; text-align-last: center; -moz-text-align-last: center; }
-        .header { display: flex; justify-content: space-between; align-items: center; }
-        .small { color: #93c5fd; font-size: 12px; }
-        .choices { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
-        .choice { background: #0a0f1f; border: 1px solid #1e2a55; padding: 10px; border-radius: 8px; display: flex; align-items: center; gap: 10px; }
-        /* New, more elegant selectable cards for choices */
-        .choice-card { background: #0a0f1f; border: 1px solid #1e2a55; padding: 10px; border-radius: 8px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease; }
-        .choice-card:hover { border-color: #3756b3; }
-        .choice-card.selected { border-color: #60a5fa; background: #0b162d; }
-        .choice-card.correct { border-color: #10b981; background: #0f1f16; }
-        .choice-card.incorrect { border-color: #ef4444; background: #1f1010; }
-        .choice-card.locked { pointer-events: none; opacity: 0.85; }
-        .choice-key { width: 24px; height: 24px; border-radius: 999px; background: #1e2a55; color: #c7d2fe; display: flex; align-items: center; justify-content: center; font-weight: 600; flex: 0 0 24px; }
-        .choice-text { color: #e5e7eb; }
-        .pill { display: inline-block; background: #1e2a55; color: #c7d2fe; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-left: 6px; }
-        a { color: #93c5fd; }
-        .flex { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-        .clip-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-        .rationale { color:#9ca3af; font-size:13px; margin-top:6px; }
-        .section-title { margin: 0 0 8px 0; }
-        .badge { background:#0a0f1f; border:1px solid #1e2a55; padding:2px 8px; border-radius:999px; font-size:12px; color:#93c5fd; }
-        /* Results */
-        .result-card { background: #111833; border: 1px solid #1e2a55; border-radius: 12px; padding: 12px; }
-        .stats { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-        .stat { background: #0a0f1f; border: 1px solid #1e2a55; border-radius: 8px; padding: 6px 10px; }
-        .ok { color: #22c55e; }
-        .bad { color: #ef4444; }
-        .per-item { margin-top: 8px; }
-        .choice-feedback { margin-top: 6px; font-size: 13px; color: #9ca3af; }
-        .choice-feedback.ok { color: #22c55e; }
-        .choice-feedback.bad { color: #f87171; }
-    </style>
-    </div>
-</body>
-    <script>
-        const $ = (id) => document.getElementById(id);
-        let token = localStorage.getItem('token');
-        let username = localStorage.getItem('username');
-        let sessionId = null;
-        let clips = [];
-        let synth = null;
-        let speakingClipId = null;
-        let remaining = 0;
-        let asked = 0;
-        let currentUtterances = [];
-        let DEFAULT_RATE = 0.92;
-        let DEFAULT_PITCH = 1.03;
-        const DEFAULT_VOLUME = 1.0;
-        let englishVoices = [];
-        const clipVoiceMap = {};
-        let nextClips = null;
-
-        async function validateToken(){
-            if (!token) return false;
-            try {
-                const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
-                if (!r.ok) throw new Error('invalid');
-                const u = await r.json().catch(() => null);
-                if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
-                return true;
-            } catch(_){
-                try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch(_) {}
-                token = null; username = null;
-                return false;
-            }
-        }
-
-        function pickBestVoice(list) {
-            if (!list || !list.length) return null;
-            const scored = list.map(v => {
-                const name = (v.name || '').toLowerCase();
-                const lang = (v.lang || '').toLowerCase();
-                let score = 0;
-                // Prefer en-US, then en-GB
-                if (lang.startsWith('en-us')) score += 8;
-                if (lang.startsWith('en-gb')) score += 7;
-                // Prefer neural/natural/online voices
-                if (name.includes('natural') || name.includes('neural') || name.includes('online')) score += 6;
-                // Vendor signals
-                if (name.includes('microsoft')) score += 5;
-                if (name.includes('google')) score += 4;
-                if (name.includes('siri')) score += 5;
-                // Mild bias to female voices for clarity
-                if (name.includes('female')) score += 1;
-                return { v: v, score };
-            });
-            scored.sort((a,b) => b.score - a.score);
-            return scored[0].v;
-        }
-
-        function populateVoices() {
-            if (!synth) return;
-            const voices = synth.getVoices();
-            englishVoices = voices.filter(v => /^en[-_]/i.test(v.lang || ''));
-        }
-
-        function initTTS() {
-            synth = window.speechSynthesis || null;
-            if (!synth) {
-                $('ttsWarning').textContent = 'Browser TTS not available. Audio playback disabled.';
-                return;
-            }
-            // Populate voices now (if available) and when the list changes
-            try { populateVoices(); } catch(_) {}
-            try { synth.onvoiceschanged = populateVoices; } catch(_) {}
-        }
-
-        function applyUtterOptions(utter, clipId) {
-            let voice = null;
-            const all = (synth && synth.getVoices && synth.getVoices()) || [];
-            const assignedName = clipVoiceMap[clipId];
-            if (assignedName) {
-                voice = (englishVoices.find(v => v.name === assignedName) || all.find(v => v.name === assignedName)) || null;
-            }
-            if (!voice) {
-                if (englishVoices && englishVoices.length) {
-                    const idx = Math.floor(Math.random() * englishVoices.length);
-                    voice = englishVoices[idx];
-                    clipVoiceMap[clipId] = voice.name;
-                } else {
-                    voice = pickBestVoice(all) || all[0] || null;
-                }
-            }
-            if (voice) {
-                utter.voice = voice;
-                if (voice.lang) utter.lang = voice.lang;
-            } else {
-                utter.lang = 'en-US';
-            }
-            utter.rate = DEFAULT_RATE;
-            utter.pitch = DEFAULT_PITCH;
-            utter.volume = DEFAULT_VOLUME;
-        }
-
-        function splitIntoChunks(text) {
-            const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
-            if (!cleaned) return [];
-            // Split by sentence enders, keep them attached
-            const parts = cleaned.match(/[^.!?\n]+[.!?\u2026]+\s*|[^.!?\n]+$/g) || [cleaned];
-            const chunks = [];
-            let buffer = '';
-            const MAX_LEN = 180;
-            for (const p of parts) {
-                if ((buffer + ' ' + p).trim().length > MAX_LEN && buffer) {
-                    chunks.push(buffer.trim());
-                    buffer = p;
-                } else {
-                    buffer = (buffer ? buffer + ' ' : '') + p;
-                }
-            }
-            if (buffer.trim()) chunks.push(buffer.trim());
-            return chunks;
-        }
-
-        function speakSegments(clipId, segments, onEnd, onError) {
-            let idx = 0;
-            currentUtterances = [];
-            function speakNext() {
-                if (!synth) { if (onEnd) onEnd(); return; }
-                if (idx >= segments.length) { if (onEnd) onEnd(); return; }
-                const utter = new SpeechSynthesisUtterance(segments[idx]);
-                applyUtterOptions(utter, clipId);
-                utter.onend = () => { idx += 1; speakNext(); };
-                utter.onerror = () => { if (onError) onError(); };
-                currentUtterances.push(utter);
-                synth.speak(utter);
-            }
-            speakNext();
-        }
-
-        function speakClip(clipId) {
-            if (!synth) return;
-            stopSpeaking();
-            const clip = clips.find(c => c.id === clipId);
-            if (!clip) return;
-            const segments = splitIntoChunks(clip.transcript);
-            speakingClipId = clipId;
-            updatePlayButtons();
-            speakSegments(clipId, segments,
-                () => { speakingClipId = null; updatePlayButtons(); },
-                () => { speakingClipId = null; updatePlayButtons(); }
-            );
-        }
-
-        function stopSpeaking() {
-            if (!synth) return;
-            synth.cancel();
-            currentUtterances = [];
-            speakingClipId = null;
-            updatePlayButtons();
-        }
-
-        function updatePlayButtons() {
-            for (const c of clips) {
-                const btn = $('play-' + c.id);
-                if (!btn) continue;
-                btn.textContent = speakingClipId === c.id ? 'Stop' : 'Play';
-            }
-        }
-
-        async function login() {
-            $('loginBtn').disabled = true; $('loginMsg').textContent = '…';
-            try {
-                const form = new URLSearchParams();
-                form.set('username', $('username').value);
-                form.set('password', $('password').value);
-                const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
-                if (!r.ok) throw new Error('login failed');
-                const j = await r.json();
-                token = j.access_token;
-                username = $('username').value || null;
-                try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch(_) {}
-                $('loginMsg').textContent = 'Logged in';
-                $('session-card').style.display = 'block';
-                $('login-card').style.display = 'none'; // Hide login card on successful login
-                updateAuthHeader(); // Update header after successful login
-            } catch (e) {
-                $('loginMsg').textContent = 'Login failed';
-            } finally {
-                $('loginBtn').disabled = false;
-            }
-        }
-
-        function renderClips() {
-            $('submitBtn').disabled = false;
-            $('submitBtn').style.display = 'block';
-            $('nextClipsBtn').style.display = 'none';
-            const root = $('clipsRoot');
-            root.innerHTML = '';
-            clips.forEach((clip, idx) => {
-                const card = document.createElement('div');
-                card.className = 'card';
-                card.innerHTML = `
-                    <div class="clip-header">
-                        <h3 class="section-title">Clip ${asked + idx + 1}: ${clip.title}</h3>
-                        <div class="flex">
-                            <span class="badge">CEFR ${clip.level_cefr}</span>
-                            <span class="badge">${clip.cambridge_level}</span>
-                            <span class="badge">${clip.exam_task_type}</span>
-                        </div>
-                    </div>
-                    <div class="flex" style="margin:8px 0 12px 0">
-                        <button id="play-${clip.id}">Play</button>
-                        <button class="secondary" id="show-${clip.id}">Show transcript</button>
-                    </div>
-                    <div id="tx-${clip.id}" class="small" style="display:none">${clip.transcript.replace(/</g,'&lt;')}</div>
-                    <div style="margin-top:8px">
-                        <div style="margin-bottom:6px">${clip.question}</div>
-                        <div class="choices" id="choices-${clip.id}">
-                            ${clip.choices.map((ch, i) => `
-                                <div class="choice-card" data-clip="${clip.id}" data-index="${i}">
-                                    <div class="choice-key">${String.fromCharCode(65 + i)}</div>
-                                    <div class="choice-text">${ch.replace(/</g,'&lt;')}</div>
-                                </div>
-                            `).join('')}
-                        </div>
-                        <div id="feedback-${clip.id}" class="choice-feedback"></div>
-                    </div>
-                `;
-                root.appendChild(card);
-                $('play-' + clip.id).addEventListener('click', () => {
-                    if (speakingClipId === clip.id) { stopSpeaking(); } else { speakClip(clip.id); }
-                });
-                $('show-' + clip.id).addEventListener('click', () => {
-                    const tx = $('tx-' + clip.id);
-                    const vis = tx.style.display !== 'none';
-                    tx.style.display = vis ? 'none' : 'block';
-                });
-                // Wire up choice selection
-                const choiceEls = card.querySelectorAll('.choice-card');
-                choiceEls.forEach(el => {
-                    el.addEventListener('click', () => {
-                        const idx = parseInt(el.getAttribute('data-index'));
-                        selectChoice(clip.id, idx);
-                    });
-                });
-                // Reflect any existing selection
-                if (Number.isInteger(clip._selected)) {
-                    highlightSelection(clip.id, clip._selected);
-                }
-            });
-            updatePlayButtons();
-        }
-
-        function highlightSelection(clipId, index) {
-            const container = $('choices-' + clipId);
-            if (!container) return;
-            container.querySelectorAll('.choice-card').forEach((el, i) => {
-                if (i === index) el.classList.add('selected'); else el.classList.remove('selected');
-            });
-        }
-
-        function selectChoice(clipId, index) {
-            const clip = clips.find(c => c.id === clipId);
-            if (!clip) return;
-            clip._selected = index;
-            highlightSelection(clipId, index);
-        }
-
-        function reflectEvaluation(results) {
-            if (!Array.isArray(results)) return;
-            results.forEach(item => {
-                if (!item || !item.clip_id) return;
-                const container = $('choices-' + item.clip_id);
-                if (!container) return;
-                const cards = container.querySelectorAll('.choice-card');
-                cards.forEach((card, idx) => {
-                    card.classList.remove('selected', 'correct', 'incorrect', 'locked');
-                    if (idx === item.correct_choice_index) {
-                        card.classList.add('correct');
-                    }
-                    if (idx === item.chosen_index && idx !== item.correct_choice_index) {
-                        card.classList.add('incorrect');
-                    }
-                    card.classList.add('locked');
-                });
-                const feedbackEl = $('feedback-' + item.clip_id);
-                if (feedbackEl) {
-                    const rationale = (item.rationale || '').trim();
-                    const label = item.correct ? 'Correct.' : 'Incorrect.';
-                    feedbackEl.textContent = rationale ? `${label} ${rationale}` : label;
-                    feedbackEl.className = `choice-feedback ${item.correct ? 'ok' : 'bad'}`;
-                }
-            });
-        }
-
-        async function startSession() {
-            $('startBtn').disabled = true; $('startMsg').textContent = '…';
-            try {
-                const level = $('level').value;
-                const r = await fetch('/listen/session/start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ start_level: level }) });
-                if (!r.ok) throw new Error('start failed');
-                const j = await r.json();
-                sessionId = j.session_id;
-                clips = j.clips || [];
-                asked = parseInt(j.asked || 0);
-                remaining = parseInt(j.remaining || (10 - asked));
-                $('startMsg').textContent = `Level: ${j.target_cefr} (${j.cambridge_level}) • Questions: ${asked}/${asked + remaining}`;
-                $('clips-card').style.display = 'block';
-                renderClips();
-            } catch (e) {
-                $('startMsg').textContent = 'Start failed';
-            } finally {
-                $('startBtn').disabled = false;
-            }
-        }
-
-        async function submitAnswers() {
-            $('submitBtn').disabled = true; $('submitMsg').textContent = '…';
-            try {
-                // Ensure each clip has a selection before submitting
-                const missing = clips.filter(c => !Number.isInteger(c._selected));
-                if (missing.length) {
-                    $('submitMsg').textContent = 'Please select an answer for all clips.';
-                    return;
-                }
-                const answers = clips.map(c => ({ clip_id: c.id, choice_index: c._selected }));
-                const r = await fetch('/listen/session/submit', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, answers }) });
-                if (!r.ok) {
-                    const errText = await r.text();
-                    $('submitMsg').textContent = 'Submit failed';
-                    $('result').innerHTML = `<div class="result-card">${errText.replace(/</g,'&lt;')}</div>`;
-                    return;
-                }
-                const j = await r.json();
-                reflectEvaluation(j.evaluated);
-                if (j.finished) {
-                    $('submitMsg').textContent = '';
-                    $('submitBtn').style.display = 'none';
-                    $('nextClipsBtn').style.display = 'none';
-                    nextClips = null;
-                    renderResult(j);
-                } else {
-                    asked = parseInt(j.asked || 0);
-                    remaining = parseInt(j.remaining || (10 - asked));
-                    $('startMsg').textContent = `Level: ${j.target_cefr} (${j.cambridge_level}) • Questions: ${asked}/${asked + remaining}`;
-                    $('submitMsg').textContent = 'Answers graded. Review feedback, then click Next.';
-                    nextClips = Array.isArray(j.clips) ? j.clips.map(c => ({ ...c })) : [];
-                    nextClips.forEach(c => { c._selected = undefined; });
-                    $('nextClipsBtn').style.display = nextClips.length ? 'block' : 'none';
-                    $('submitBtn').style.display = 'none';
-                    $('finishSessionBtnContainer').style.display = 'none';
-                }
-            } catch (e) {
-                $('result').innerHTML = `<div class="result-card">${String(e).replace(/</g,'&lt;')}</div>`;
-            } finally {
-                $('submitBtn').disabled = false;
-            }
-        }
-
-        function loadNextClips() {
-            if (!Array.isArray(nextClips) || !nextClips.length) {
-                $('nextClipsBtn').style.display = 'none';
-                $('submitBtn').style.display = 'block';
-                return;
-            }
-            stopSpeaking();
-            clips = nextClips.map(c => ({ ...c }));
-            nextClips = null;
-            clips.forEach(c => { c._selected = undefined; });
-            $('result').innerHTML = '';
-            $('resultSection').style.display = 'none';
-            $('submitMsg').textContent = '';
-            $('submitBtn').style.display = 'block';
-            $('submitBtn').disabled = false;
-            $('nextClipsBtn').style.display = 'none';
-            renderClips();
-        }
-
-        function renderResult(res) {
-            $('submitBtn').style.display = 'none';
-            $('nextClipsBtn').style.display = 'none';
-            $('finishSessionBtnContainer').style.display = 'block';
-            $('resultSection').style.display = 'block';
-            const correct = parseInt(res.correct) || 0;
-            const incorrect = parseInt(res.incorrect) || 0;
-            const total = parseInt(res.total) || (correct + incorrect);
-            const band = res.final_level || res.estimated_band || '-';
-            const exam = (res.exam_mapping && res.exam_mapping.exam) || '-';
-            const vocab = (res.exam_mapping && res.exam_mapping.target_vocab) || [];
-            const structs = (res.exam_mapping && res.exam_mapping.target_structures) || [];
-
-            const per = Array.isArray(res.per_item) ? res.per_item : [];
-            const perHtml = per.map((p, i) => `
-                <div class="small per-item">Item ${i + 1} • <span class="${p.correct ? 'ok' : 'bad'}">${p.correct ? 'Correct' : 'Incorrect'}</span> (CEFR ${p.level_cefr}, ${p.cambridge_level})</div>
-            `).join('');
-
-            const vocabHtml = vocab.map(v => `<span class="pill">${String(v).replace(/</g,'&lt;')}</span>`).join(' ');
-            const structsHtml = structs.map(s => `<span class="pill">${String(s).replace(/</g,'&lt;')}</span>`).join(' ');
-
-            const raw = JSON.stringify(res, null, 2).replace(/</g,'&lt;');
-            $('result').innerHTML = `
-                <div class="result-card">
-                    <div class="stats">
-                        <div class="stat">Score: <strong>${correct}/${total}</strong></div>
-                        <div class="stat">Final level: <strong>${band}</strong></div>
-                        <div class="stat">Exam: <strong>${exam}</strong></div>
-                    </div>
-                    ${perHtml}
-                    <div style="margin-top:8px">
-                        <div class="small" style="margin:4px 0">Target vocabulary:</div>
-                        <div class="flex">${vocabHtml || '<span class="small">—</span>'}</div>
-                        <div class="small" style="margin:8px 0 4px 0">Target structures:</div>
-                        <div class="flex">${structsHtml || '<span class="small">—</span>'}</div>
-                    </div>
-                    <details style="margin-top:10px">
-                        <summary class="small">Raw JSON</summary>
-                        <pre style="white-space:pre-wrap">${raw}</pre>
-                    </details>
-                </div>
-            `;
-        }
-
-        function updateAuthHeader(){
-            const st = document.getElementById('authState');
-            const link = document.getElementById('loginLink');
-            if (!st) return;
-            if (token) { st.textContent = username ? `Logged in as ${username}` : 'Logged in'; if (link) link.style.display='none'; }
-            else { st.textContent = 'Logged out'; if (link) link.style.display='inline'; }
-        }
-
-        window.addEventListener('DOMContentLoaded', async () => {
-            const ok = await validateToken();
-            if (ok) {
-                $('login-card').style.display = 'none';
-                $('session-card').style.display = 'block';
-                updateAuthHeader();
-            } else {
-                $('login-card').style.display = 'block';
-                $('session-card').style.display = 'none';
-                updateAuthHeader();
-            }
-            initTTS();
-            $('loginBtn').addEventListener('click', login);
-            $('startBtn').addEventListener('click', startSession);
-            $('submitBtn').addEventListener('click', submitAnswers);
-        });
-    </script>
-</html>
+    
+    <!-- 
+        Listening Module Frontend Documentation
+        =====================================
+        
+        This file implements the frontend interface for the adaptive listening assessment module.
+        It provides a complete listening evaluation system with text-to-speech audio playback,
+        multiple choice questions, and real-time feedback integration with the backend API.
+        
+        KEY FEATURES:
+        - Text-to-speech audio playback using Web Speech API
+        - Adaptive difficulty progression based on performance
+        - Multiple choice questions with immediate feedback
+        - Session management with progress tracking
+        - Comprehensive results display with vocabulary targets
+        
+        BROWSER COMPATIBILITY:
+        - Requires modern browsers with Web Speech API support
+        - Chrome/Firefox recommended for best TTS performance
+        - HTTPS required for speech synthesis on non-localhost origins
+        
+        WORKFLOW:
+        1. User logs in (guest/any for testing)
+        2. Starts listening session with A2 level
+        3. Listens to audio clips and answers questions
+        4. Receives immediate feedback and adaptive level adjustment
+        5. Continues through 10 questions total
+        6. Receives final assessment with recommendations
+    -->
+    
+    <!-- Shared CSS Styles -->
+    <link rel="stylesheet" href="../shared/css/base.css">
+    <link rel="stylesheet" href="../shared/css/components.css">
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <!-- Main application container -->
     <div class="container">
+        <!-- Header with navigation and auth state -->
         <div class="header">
             <h2>Listening Module</h2>
-            <div class="small"><a href="/app">Home</a> · <span id="authState">Logged out</span> <a href="/app" id="loginLink">Login</a></div>
+            <div class="small">
+                <a href="/app">Home</a> · 
+                <span id="authState">Logged out</span> 
+                <a href="/app" id="loginLink">Login</a>
+            </div>
         </div>
 
+        <!-- Back navigation card -->
         <div class="card">
             <button onclick="window.location.href = '/app/';">← Back</button>
         </div>
 
-        <div class="card">
-            <div id="ttsWarning" class="small"></div>
-            <div class="small">Endpoints: <code>/listen/session/start</code>, <code>/listen/session/submit</code></div>
-        </div>
 
+        <!-- Login form card -->
         <div class="card" id="login-card">
             <h3>Login</h3>
+            <form id="loginForm">
             <div class="row">
                 <div>
-                    <label>Username</label>
-                    <input id="username" placeholder="username" value="guest" />
+                        <label for="username">Username</label>
+                        <input id="username" type="text" placeholder="username" value="guest" required>
                 </div>
                 <div>
-                    <label>Password</label>
-                    <input id="password" type="password" placeholder="password" value="any" />
+                        <label for="password">Password</label>
+                        <input id="password" type="password" placeholder="password" value="any" required>
                 </div>
             </div>
             <div style="margin-top:12px">
-                <button id="loginBtn">Login</button>
+                    <button type="submit">Login</button>
                 <span id="loginMsg" class="small" style="margin-left:8px"></span>
             </div>
+            </form>
         </div>
 
-        <div class="card" id="session-card" style="display:none">
+        <!-- Session start card -->
+        <div class="card hidden" id="session-card">
             <h3>Start</h3>
-            <div class="small" style="margin-bottom: 12px;">Starting at CEFR A2 (KET). Difficulty adapts based on your answers.</div>
+            <div class="small" style="margin-bottom: 12px;">
+                Starting at CEFR A2 (KET). Difficulty adapts based on your answers.
+            </div>
             <div class="row session-row">
                 <div>
                     <!-- Level selection removed to force A2 -->
@@ -549,22 +97,30 @@
             <div class="small" id="startMsg" style="margin-top:8px"></div>
         </div>
 
-        <div class="card" id="clips-card" style="display:none">
+        <!-- Clips and questions card -->
+        <div class="card hidden" id="clips-card">
             <h3>Clips & Questions</h3>
             <div id="clipsRoot"></div>
             <div style="margin-top:12px">
                 <button id="submitBtn">Submit Answers</button>
                 <span id="submitMsg" class="small" style="margin-left:8px"></span>
-                <button id="nextClipsBtn" style="display:none; margin-left: 8px;" onclick="loadNextClips()">Next</button>
+                <button id="nextClipsBtn" class="hidden" style="margin-left: 8px;" onclick="loadNextClips()">Next</button>
             </div>
-            <div id="resultSection" style="display:none; margin-top:12px">
+            <div id="resultSection" class="hidden" style="margin-top:12px">
                 <h3 class="section-title">Result</h3>
                 <div id="result"></div>
-                <div style="margin-top: 16px;" id="finishSessionBtnContainer" style="display:none;">
+                <div style="margin-top: 16px;" id="finishSessionBtnContainer" class="hidden">
                     <button onclick="window.location.href = '/app/';">Session finished — back to home</button>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Load shared utilities -->
+    <script src="../shared/js/auth.js?v=20251022"></script>
+    <script src="../shared/js/api.js?v=20251022"></script>
+    
+    <!-- Load the TypeScript module -->
+    <script type="module" src="listen.js?v=20251022"></script>
 </body>
 </html>
