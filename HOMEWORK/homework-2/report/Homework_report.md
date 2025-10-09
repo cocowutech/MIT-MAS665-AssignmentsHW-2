@@ -1,9 +1,9 @@
 
 # HW2 - "Analyst Track" Comparative Analysis of AI Architectures for Adaptive Language Assessment
 
-**Course:** MIT MAS.665 - AI for Impact  
+**Course:** MAS.665 AI Studio: AI Agents and Agentic Web
 **Author:** Rong Wu  
-**Date:** September 24, 2025
+**Date:** October 24, 2025
 
 ---
 

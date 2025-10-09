@@ -309,10 +309,11 @@ async function startSession(): Promise<SpeakingSessionResponse> {
  * @returns Evaluation result
  * @throws Error if submission fails
  */
-async function submitAnswer(answer: SpeakingAnswer): Promise<SpeakingEvaluation> {
+async function submitAnswer(answer: SpeakingAnswer): Promise<any> {
     try {
         const response = await APIUtils.SpeakingAPI.submitAnswer(answer);
-        return response.evaluation;
+        // Backend returns evaluation fields at top level, not nested under 'evaluation'
+        return response;
     } catch (error) {
         throw new Error('Failed to submit answer');
     }
@@ -959,11 +960,17 @@ function displayEvaluationResults(evaluation: any): void {
     const llmFeedback = hasLLMScore ? evaluation.llm_feedback : 'LLM scoring unavailable';
     const llmLevel = hasLLMScore ? evaluation.llm_level : 'N/A';
     
+    // Backend provides pronunciation_score, not traditional score breakdown
+    const pronunciationScore = evaluation.pronunciation_score || 0;
+    const predictedLevel = evaluation.predicted_level || 'N/A';
+    const currentLevel = evaluation.level || 'N/A';
+    const feedback = evaluation.feedback || 'No feedback available';
+    
     resultsDiv.innerHTML = `
         <div class="evaluation-results">
             <div class="evaluation-header">
                 <h3 class="evaluation-title">Evaluation Results</h3>
-                <div class="evaluation-score">${evaluation.score}/100</div>
+                <div class="evaluation-score">${pronunciationScore}/100</div>
             </div>
             
             ${hasLLMScore ? `
@@ -986,21 +993,27 @@ function displayEvaluationResults(evaluation: any): void {
             <div class="evaluation-breakdown">
                 <div class="evaluation-item">
                     <div class="evaluation-item-label">Pronunciation</div>
-                    <div class="evaluation-item-value">${evaluation.pronunciation_score}/100</div>
+                    <div class="evaluation-item-value">${pronunciationScore}/100</div>
                 </div>
                 <div class="evaluation-item">
-                    <div class="evaluation-item-label">Fluency</div>
-                    <div class="evaluation-item-value">${evaluation.fluency_score}/100</div>
+                    <div class="evaluation-item-label">Predicted Level</div>
+                    <div class="evaluation-item-value">${predictedLevel}</div>
                 </div>
                 <div class="evaluation-item">
-                    <div class="evaluation-item-label">Accuracy</div>
-                    <div class="evaluation-item-value">${evaluation.accuracy_score}/100</div>
+                    <div class="evaluation-item-label">Current Level</div>
+                    <div class="evaluation-item-value">${currentLevel}</div>
                 </div>
             </div>
             <div class="evaluation-feedback">
                 <strong>Feedback:</strong><br>
-                ${evaluation.feedback}
+                ${feedback}
             </div>
+            ${evaluation.pronunciation_feedback ? `
+            <div class="evaluation-feedback">
+                <strong>Pronunciation Feedback:</strong><br>
+                ${evaluation.pronunciation_feedback}
+            </div>
+            ` : ''}
         </div>
     `;
     
