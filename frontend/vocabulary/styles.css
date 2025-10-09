@@ -1,0 +1,433 @@
+/**
+ * Vocabulary Module Specific Styles
+ * 
+ * This file contains styles specific to the vocabulary assessment module.
+ * It extends the shared base and component styles with vocabulary-specific elements.
+ * 
+ * @author ESL Assessment System
+ * @version 1.0
+ */
+
+/* ============================================================================
+   VOCABULARY-SPECIFIC COMPONENTS
+   ============================================================================ */
+
+/* Vocabulary question */
+.vocabulary-question {
+    background: #111833;
+    border: 1px solid #1e2a55;
+    padding: 20px;
+    border-radius: 12px;
+    margin: 16px 0;
+}
+
+.question-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.question-number {
+    font-size: 14px;
+    font-weight: 600;
+    color: #93c5fd;
+    background: #1e2a55;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.question-difficulty {
+    font-size: 12px;
+    color: #c7d2fe;
+    background: #0a0f1f;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.passage-text {
+    font-size: 16px;
+    color: #c7d2fe;
+    margin-bottom: 20px;
+    line-height: 1.6;
+    padding: 16px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+    text-align: left;
+}
+
+.question-text {
+    font-size: 18px;
+    color: #f2f4f8;
+    margin-bottom: 20px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.target-word {
+    font-weight: 600;
+    color: #2563eb;
+    background: #0a0f1f;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #1e2a55;
+}
+
+/* Multiple choice options */
+.vocabulary-choices {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.vocabulary-choice {
+    background: #0f172a;
+    border: 1px solid #334155;
+    padding: 16px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.vocabulary-choice:hover {
+    background: #1e2a55;
+    border-color: #2563eb;
+}
+
+.vocabulary-choice.selected {
+    background: #1e2a55;
+    border-color: #2563eb;
+}
+
+.vocabulary-choice.correct {
+    background: #0f1f0f;
+    border-color: #10b981;
+    color: #34d399;
+}
+
+.vocabulary-choice.incorrect {
+    background: #1f0f0f;
+    border-color: #ef4444;
+    color: #f87171;
+}
+
+.choice-key {
+    font-weight: 600;
+    color: #93c5fd;
+    min-width: 24px;
+    text-align: center;
+    font-size: 16px;
+}
+
+.choice-text {
+    flex: 1;
+    color: #e5e7eb;
+    font-size: 16px;
+}
+
+/* Progress indicator */
+.vocabulary-progress {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 16px 0;
+    padding: 12px 16px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+}
+
+.progress-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.progress-text {
+    font-size: 14px;
+    color: #93c5fd;
+    font-weight: 500;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 8px;
+    background: #1e2a55;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 0 16px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #2563eb;
+    transition: width 0.3s ease;
+    border-radius: 4px;
+}
+
+/* Timer display */
+.vocabulary-timer {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f2f4f8;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-variant-numeric: tabular-nums;
+}
+
+.vocabulary-timer.warning {
+    color: #fbbf24;
+    border-color: #fbbf24;
+}
+
+.vocabulary-timer.critical {
+    color: #ef4444;
+    border-color: #ef4444;
+    animation: pulse 1s ease-in-out infinite;
+}
+
+/* Results display */
+.vocabulary-results {
+    background: #111833;
+    border: 1px solid #1e2a55;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 16px 0;
+}
+
+.results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.results-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+    margin: 0;
+}
+
+.results-score {
+    font-size: 24px;
+    font-weight: 700;
+    color: #22c55e;
+}
+
+.results-breakdown {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.result-item {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.result-label {
+    font-size: 12px;
+    color: #93c5fd;
+    margin-bottom: 4px;
+}
+
+.result-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f2f4f8;
+}
+
+.results-feedback {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 16px;
+    border-radius: 8px;
+    margin-top: 16px;
+}
+
+.feedback-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #93c5fd;
+    margin-bottom: 8px;
+}
+
+.feedback-text {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #c7d2fe;
+}
+
+/* Navigation controls */
+.vocabulary-navigation {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 16px 0;
+    padding: 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+}
+
+.nav-button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    min-width: 100px;
+}
+
+.nav-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Level indicator */
+.vocabulary-level {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #93c5fd;
+}
+
+.level-badge {
+    background: #1e2a55;
+    color: #c7d2fe;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* Session summary */
+.session-summary {
+    background: #111833;
+    border: 1px solid #1e2a55;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 16px 0;
+}
+
+.summary-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.summary-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.summary-stat {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.summary-stat-label {
+    font-size: 12px;
+    color: #93c5fd;
+    margin-bottom: 4px;
+}
+
+.summary-stat-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+}
+
+/* Word definition display */
+.word-definition {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 16px;
+    border-radius: 8px;
+    margin: 16px 0;
+}
+
+.definition-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f2f4f8;
+    margin-bottom: 8px;
+}
+
+.definition-text {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #c7d2fe;
+}
+
+.definition-example {
+    font-size: 13px;
+    color: #93c5fd;
+    font-style: italic;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #1e2a55;
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+@media (max-width: 768px) {
+    .vocabulary-choices {
+        gap: 8px;
+    }
+    
+    .vocabulary-choice {
+        padding: 12px 16px;
+    }
+    
+    .progress-info {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .progress-bar {
+        margin: 0;
+    }
+    
+    .results-breakdown {
+        grid-template-columns: 1fr;
+    }
+    
+    .summary-stats {
+        grid-template-columns: 1fr;
+    }
+    
+    .vocabulary-navigation {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .nav-button {
+        width: 100%;
+    }
+}

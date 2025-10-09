@@ -1,0 +1,329 @@
+/**
+ * Component CSS Styles for ESL Assessment System
+ * 
+ * This file contains reusable UI component styles shared across all modules.
+ * It provides consistent styling for interactive elements, forms, and feedback.
+ * 
+ * @author ESL Assessment System
+ * @version 1.0
+ */
+
+/* ============================================================================
+   CHOICE AND OPTION COMPONENTS
+   ============================================================================ */
+
+/* Multiple choice options layout */
+.choices { 
+    display: grid; 
+    grid-template-columns: 1fr; 
+    gap: 8px; 
+    margin-top: 8px; 
+}
+
+/* Legacy choice styling - Might not be relevant anymore */
+.choice { 
+    background: #0a0f1f; 
+    border: 1px solid #1e2a55; 
+    padding: 10px; 
+    border-radius: 8px; 
+    display: flex; 
+    align-items: center; 
+    gap: 10px; 
+}
+
+/* Interactive choice cards with hover and selection states */
+.choice-card { 
+    background: #0a0f1f; 
+    border: 1px solid #1e2a55; 
+    padding: 10px; 
+    border-radius: 8px; 
+    display: flex; 
+    align-items: center; 
+    gap: 10px; 
+    cursor: pointer; 
+    transition: background 0.15s ease, border-color 0.15s ease; 
+}
+
+.choice-card:hover { 
+    border-color: #3756b3; 
+}
+
+.choice-card.selected { 
+    border-color: #60a5fa; 
+    background: #0b162d; 
+}
+
+.choice-card.correct { 
+    border-color: #10b981; 
+    background: #0f1f16; 
+}
+
+.choice-card.incorrect { 
+    border-color: #ef4444; 
+    background: #1f1010; 
+}
+
+.choice-card.locked { 
+    pointer-events: none; 
+    opacity: 0.85; 
+}
+
+/* Choice key styling (A, B, C, D indicators) */
+.choice-key { 
+    width: 24px; 
+    height: 24px; 
+    border-radius: 999px; 
+    background: #1e2a55; 
+    color: #c7d2fe; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    font-weight: 600; 
+    flex: 0 0 24px; 
+}
+
+.choice-text { 
+    color: #e5e7eb; 
+}
+
+/* Option component (alternative to choice-card) */
+.option { 
+    background: #0f172a; 
+    border: 1px solid #1e2a55; 
+    padding: 10px; 
+    border-radius: 8px; 
+    cursor: pointer; 
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.option:hover {
+    border-color: #3756b3;
+}
+
+.option.selected { 
+    border-color: #2563eb; 
+    background: #0b162d;
+}
+
+.option.correct { 
+    border-color: #16a34a; 
+    background: #0f1f16;
+}
+
+.option.incorrect { 
+    border-color: #dc2626; 
+    background: #1f1010;
+}
+
+/* ============================================================================
+   FEEDBACK AND RESULTS COMPONENTS
+   ============================================================================ */
+
+/* Choice feedback styling */
+.choice-feedback { 
+    margin-top: 6px; 
+    font-size: 13px; 
+    color: #9ca3af; 
+}
+
+.choice-feedback.ok { 
+    color: #22c55e; 
+}
+
+.choice-feedback.bad { 
+    color: #f87171; 
+}
+
+/* Results section styling */
+.result-card { 
+    background: #111833; 
+    border: 1px solid #1e2a55; 
+    border-radius: 12px; 
+    padding: 12px; 
+}
+
+.stats { 
+    display: flex; 
+    gap: 8px; 
+    flex-wrap: wrap; 
+    margin-top: 6px; 
+}
+
+.stat { 
+    background: #0a0f1f; 
+    border: 1px solid #1e2a55; 
+    border-radius: 8px; 
+    padding: 6px 10px; 
+}
+
+/* Per-item result styling */
+.per-item { 
+    margin-top: 8px; 
+}
+
+/* ============================================================================
+   FORM COMPONENTS
+   ============================================================================ */
+
+/* Session row layout with centered content */
+.session-row { 
+    justify-content: center; 
+}
+
+.session-row > * { 
+    flex: 0 0 auto; 
+}
+
+.session-row > div:first-child { 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+}
+
+/* CEFR dropdown styling */
+.level-selector { 
+    width: 180px; 
+    text-align: center; 
+    text-align-last: center; 
+    -moz-text-align-last: center; 
+}
+
+/* ============================================================================
+   CONTENT DISPLAY COMPONENTS
+   ============================================================================ */
+
+/* Passage and text content */
+.passage { 
+    white-space: pre-wrap; 
+    word-break: break-word; 
+    background: #0a0f1f; 
+    border: 1px solid #1e2a55; 
+    padding: 12px; 
+    border-radius: 8px; 
+    line-height: 1.6;
+}
+
+/* Clip header layout */
+.clip-header { 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    gap: 8px; 
+}
+
+/* Rationale text styling */
+.rationale { 
+    color: #9ca3af; 
+    font-size: 13px; 
+    margin-top: 6px; 
+}
+
+/* ============================================================================
+   AUDIO AND MEDIA COMPONENTS
+   ============================================================================ */
+
+/* Audio controls */
+.audio-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 8px 0 12px 0;
+}
+
+/* Recording indicator */
+.recording-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #ef4444;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.recording-dot {
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ============================================================================
+   PROGRESS AND STATUS COMPONENTS
+   ============================================================================ */
+
+/* Progress bar */
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #1e2a55;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #2563eb;
+    transition: width 0.3s ease;
+}
+
+/* Status messages */
+.status-message {
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin: 8px 0;
+}
+
+.status-message.success {
+    background: #0f1f16;
+    border: 1px solid #10b981;
+    color: #22c55e;
+}
+
+.status-message.error {
+    background: #1f1010;
+    border: 1px solid #ef4444;
+    color: #f87171;
+}
+
+.status-message.info {
+    background: #0b162d;
+    border: 1px solid #60a5fa;
+    color: #93c5fd;
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN FOR COMPONENTS
+   ============================================================================ */
+
+@media (max-width: 768px) {
+    .choices {
+        gap: 6px;
+    }
+    
+    .choice-card, .option {
+        padding: 8px;
+    }
+    
+    .choice-key {
+        width: 20px;
+        height: 20px;
+        font-size: 12px;
+    }
+    
+    .stats {
+        flex-direction: column;
+        gap: 6px;
+    }
+    
+    .audio-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}

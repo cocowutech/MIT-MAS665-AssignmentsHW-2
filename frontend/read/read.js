@@ -1,0 +1,725 @@
+/**
+ * Reading Module TypeScript Implementation
+ *
+ * This file contains the TypeScript implementation for the reading assessment module.
+ * It provides a complete reading evaluation system with adaptive difficulty,
+ * multiple choice questions, and real-time feedback integration with the backend API.
+ *
+ * @author ESL Assessment System
+ * @version 1.0
+ */
+// ============================================================================
+// READING MODULE STATE MANAGEMENT
+// ============================================================================
+/**
+ * Centralized state management for the reading module
+ */
+class ReadingModuleState {
+    constructor() {
+        // Authentication state
+        this.token = localStorage.getItem('token');
+        this.username = localStorage.getItem('username');
+        // Session state
+        this.session = null;
+        this.currentPassage = null;
+        this.currentQuestion = null;
+        this.selectedAnswer = null;
+        this.questionStartTime = 0;
+        this.sessionStartTime = 0;
+        // UI state
+        this.isQuestionAnswered = false;
+        this.showResults = false;
+        this.isSessionActive = false;
+        this.lastEvaluation = null;
+        this.finalLevel = null;
+        this.initializeAuth();
+    }
+    /**
+     * Initialize authentication state
+     */
+    initializeAuth() {
+        if (this.token && this.username) {
+            AuthUtils.updateAuthHeader();
+            AuthUtils.updateUIForAuthStatus();
+        }
+    }
+    /**
+     * Update authentication state
+     */
+    updateAuth(token, username) {
+        this.token = token;
+        this.username = username;
+        localStorage.setItem('token', token);
+        localStorage.setItem('username', username);
+        AuthUtils.updateAuthHeader();
+        AuthUtils.updateUIForAuthStatus();
+    }
+    /**
+     * Clear authentication state
+     */
+    clearAuth() {
+        this.token = null;
+        this.username = null;
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        AuthUtils.updateUIForAuthStatus();
+    }
+    /**
+     * Reset session state
+     */
+    resetSessionState() {
+        this.session = null;
+        this.currentPassage = null;
+        this.currentQuestion = null;
+        this.selectedAnswer = null;
+        this.questionStartTime = 0;
+        this.sessionStartTime = 0;
+        this.isQuestionAnswered = false;
+        this.showResults = false;
+        this.isSessionActive = false;
+    }
+    /**
+     * Start question timer
+     */
+    startQuestionTimer() {
+        this.questionStartTime = Date.now();
+    }
+    /**
+     * Get time taken for current question
+     */
+    getQuestionTime() {
+        if (this.questionStartTime === 0)
+            return 0;
+        return Date.now() - this.questionStartTime;
+    }
+}
+// ============================================================================
+// GLOBAL STATE INSTANCE
+// ============================================================================
+const moduleState = new ReadingModuleState();
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+// $ function removed - use APIUtils.$element instead
+/**
+ * Show an element by removing the 'hidden' class
+ * @param el - Element ID or DOM element
+ */
+function show(el) {
+    const node = typeof el === 'string' ? APIUtils.$element(el) : el;
+    if (!node)
+        return;
+    node.classList.remove('hidden');
+}
+/**
+ * Hide an element by adding the 'hidden' class
+ * @param el - Element ID or DOM element
+ */
+function hide(el) {
+    const node = typeof el === 'string' ? APIUtils.$element(el) : el;
+    if (!node)
+        return;
+    node.classList.add('hidden');
+}
+/**
+ * Format time in milliseconds to readable format
+ * @param ms - Time in milliseconds
+ * @returns Formatted time string
+ */
+function formatTime(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (minutes > 0) {
+        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }
+    return `${remainingSeconds}s`;
+}
+/**
+ * Calculate progress percentage
+ * @param current - Current progress
+ * @param total - Total progress
+ * @returns Progress percentage
+ */
+function calculateProgress(current, total) {
+    if (total === 0)
+        return 0;
+    return Math.round((current / total) * 100);
+}
+// ============================================================================
+// AUTHENTICATION FUNCTIONS
+// ============================================================================
+/**
+ * Authenticate user with backend and store token
+ * Backend: POST /auth/token (auth.py:login)
+ * @param username - User login name
+ * @param password - User password
+ * @returns JWT access token
+ * @throws Error if authentication fails
+ */
+async function login(username, password) {
+    try {
+        const result = await AuthUtils.authenticateUser(username, password);
+        if (result.success) {
+            // AuthUtils already handles token storage and UI updates
+            return AuthUtils.authState.token;
+        }
+        else {
+            throw new Error(result.error || 'Login failed');
+        }
+    }
+    catch (error) {
+        throw new Error('Login failed');
+    }
+}
+// ============================================================================
+// READING SESSION FUNCTIONS
+// ============================================================================
+/**
+ * Initialize a new reading assessment session
+ * Backend: POST /read/start (read.py:start)
+ * @param startLevel - CEFR level to start the assessment with
+ * @returns Session data with first reading task
+ * @throws Error if session initialization fails
+ */
+async function startSession(startLevel = 'A2') {
+    try {
+        const response = await APIUtils.ReadingAPI.startSession(startLevel);
+        // Backend returns data at top level, not nested under 'session'
+        moduleState.session = {
+            session_id: response.session_id,
+            target_cefr: response.target_cefr,
+            cambridge_level: response.cambridge_level,
+            passage_index: response.passage_index,
+            max_passages: response.max_passages,
+            questions_per_passage: response.questions_per_passage,
+            total_questions: response.total_questions
+        };
+        moduleState.currentPassage = {
+            text: response.passage,
+            index: response.passage_index
+        };
+        moduleState.currentQuestion = response.question;
+        moduleState.sessionStartTime = Date.now();
+        moduleState.isSessionActive = true;
+        return response;
+    }
+    catch (error) {
+        throw new Error('Failed to start session');
+    }
+}
+/**
+ * Submit reading answer for evaluation
+ * Backend: POST /read/answer (read.py:answer)
+ * @param answer - Reading answer data
+ * @returns Evaluation result
+ * @throws Error if submission fails
+ */
+async function submitAnswer(answer) {
+    try {
+        const response = await APIUtils.ReadingAPI.submitAnswer(answer);
+        // Backend returns evaluation data at top level, not nested under 'evaluation'
+        return response;
+    }
+    catch (error) {
+        throw new Error('Failed to submit answer');
+    }
+}
+/**
+ * Get next question in current session
+ * Backend: POST /read/next (read.py:next)
+ * @returns Next question or session completion status
+ * @throws Error if request fails
+ */
+async function getNextQuestion() {
+    try {
+        const response = await APIUtils.ReadingAPI.getNextQuestion();
+        // This function is deprecated - next question comes from submit response
+        throw new Error('getNextQuestion is deprecated - use submit response instead');
+    }
+    catch (error) {
+        throw new Error('Failed to get next question');
+    }
+}
+// ============================================================================
+// UI RENDERING FUNCTIONS
+// ============================================================================
+/**
+ * Display reading passage
+ * @param passage - Reading passage data
+ */
+function displayPassage(passage) {
+    const passageDiv = APIUtils.$element('passage');
+    if (!passageDiv)
+        return;
+    passageDiv.innerHTML = `
+        <div class="reading-passage">
+            <div class="passage-title">Reading Passage ${passage.index}</div>
+            <div class="passage-text">${passage.text}</div>
+            <div class="passage-meta">
+                Level: ${moduleState.session?.target_cefr || 'A2'} | Cambridge: ${moduleState.session?.cambridge_level || 'KET'}
+            </div>
+        </div>
+    `;
+    show('passage');
+}
+/**
+ * Display reading question
+ * @param question - Reading question data
+ */
+function displayQuestion(question) {
+    const questionDiv = APIUtils.$element('question');
+    if (!questionDiv)
+        return;
+    const choicesHtml = question.choices.map((choice, index) => `
+        <div class="reading-choice" data-index="${index}" onclick="selectAnswer(${index})">
+            <span class="choice-key">${String.fromCharCode(65 + index)}</span>
+            <span class="choice-text">${choice}</span>
+        </div>
+    `).join('');
+    questionDiv.innerHTML = `
+        <div class="reading-question">
+            <div class="question-header">
+                <span class="question-number">Question ${question.number}</span>
+                <span class="question-difficulty">${question.level_cefr}</span>
+            </div>
+            <div class="question-text">${question.text}</div>
+            <div class="reading-choices">
+                ${choicesHtml}
+            </div>
+        </div>
+    `;
+    show('question');
+    moduleState.startQuestionTimer();
+    // Reset submit button for new question
+    const submitBtn = APIUtils.$element('submitBtn');
+    if (submitBtn) {
+        submitBtn.textContent = 'Submit Answer';
+        submitBtn.disabled = true;
+    }
+}
+/**
+ * Update progress display
+ */
+function updateProgress() {
+    if (!moduleState.session)
+        return;
+    const progressDiv = APIUtils.$element('progress');
+    if (!progressDiv)
+        return;
+    const totalQuestions = moduleState.session?.total_questions || 15;
+    const currentQuestion = moduleState.currentQuestion?.number || 1;
+    const progress = calculateProgress(currentQuestion, totalQuestions);
+    progressDiv.innerHTML = `
+        <div class="reading-progress">
+            <div class="progress-info">
+                <span class="progress-text">Progress: ${currentQuestion}/${totalQuestions}</span>
+                <span class="reading-level">
+                    Level: <span class="level-badge">${moduleState.session?.target_cefr || 'A2'}</span>
+                </span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: ${progress}%"></div>
+            </div>
+        </div>
+    `;
+    show('progress');
+}
+/**
+ * Display evaluation results
+ * @param evaluation - Evaluation result data
+ */
+function displayEvaluationResults(evaluation) {
+    const resultsDiv = APIUtils.$element('results');
+    if (!resultsDiv)
+        return;
+    const isCorrect = evaluation.correct;
+    const scoreColor = isCorrect ? '#22c55e' : '#ef4444';
+    resultsDiv.innerHTML = `
+        <div class="reading-results">
+            <div class="results-header">
+                <h3 class="results-title">Question Result</h3>
+                <div class="results-score" style="color: ${scoreColor}">
+                    ${isCorrect ? 'Correct' : 'Incorrect'}
+                </div>
+            </div>
+            <div class="results-breakdown">
+                <div class="result-item">
+                    <div class="result-label">Progress</div>
+                    <div class="result-value">${evaluation.asked}/${evaluation.asked + evaluation.remaining}</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Time</div>
+                    <div class="result-value">${formatTime(moduleState.getQuestionTime())}</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Level</div>
+                    <div class="result-value">${evaluation.updated_target_cefr}</div>
+                </div>
+            </div>
+            <div class="results-feedback">
+                <div class="feedback-title">Explanation</div>
+                <div class="feedback-text">${evaluation.rationale}</div>
+            </div>
+        </div>
+    `;
+    show('results');
+    moduleState.showResults = true;
+}
+/**
+ * Show session completion screen
+ * @param finalScore - Final session score
+ */
+function showSessionComplete(finalScore) {
+    const resultsDiv = APIUtils.$element('results');
+    if (!resultsDiv)
+        return;
+    const sessionTime = Date.now() - moduleState.sessionStartTime;
+    const finalLevel = moduleState.lastEvaluation?.updated_target_cefr || moduleState.session?.target_cefr || 'A2';
+    // Store final level for assess again functionality
+    moduleState.finalLevel = finalLevel;
+    resultsDiv.innerHTML = `
+        <div class="session-summary">
+            <div class="summary-title">Reading Assessment Complete!</div>
+            <div class="summary-stats">
+                <div class="summary-stat">
+                    <div class="summary-stat-label">Final Score</div>
+                    <div class="summary-stat-value">${finalScore}/100</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-label">Questions</div>
+                    <div class="summary-stat-value">${moduleState.session?.total_questions || 0}</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-label">Time Taken</div>
+                    <div class="summary-stat-value">${formatTime(sessionTime)}</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-label">Final Level</div>
+                    <div class="summary-stat-value">${finalLevel}</div>
+                </div>
+            </div>
+            <div class="results-feedback">
+                <div class="feedback-title">Congratulations!</div>
+                <div class="feedback-text">
+                    You have completed the reading assessment. Your performance has been evaluated
+                    and your English reading level has been determined. Thank you for using the
+                    ESL Assessment System.
+                </div>
+            </div>
+        </div>
+    `;
+    // Update submit button to "Assess again"
+    const submitBtn = APIUtils.$element('submitBtn');
+    if (submitBtn) {
+        submitBtn.textContent = 'Assess again';
+        submitBtn.disabled = false;
+    }
+    show('results');
+    moduleState.showResults = true;
+    moduleState.isSessionActive = false;
+}
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+/**
+ * Handle answer selection
+ * @param index - Selected answer index
+ */
+function selectAnswer(index) {
+    if (moduleState.isQuestionAnswered)
+        return;
+    moduleState.selectedAnswer = index;
+    // Update UI to show selection
+    const choices = document.querySelectorAll('.reading-choice');
+    choices.forEach((choice, i) => {
+        choice.classList.remove('selected');
+        if (i === index) {
+            choice.classList.add('selected');
+        }
+    });
+    // Enable submit button
+    const submitBtn = APIUtils.$element('submitBtn');
+    if (submitBtn) {
+        submitBtn.disabled = false;
+    }
+}
+/**
+ * Handle answer submission
+ */
+async function handleSubmitAnswer() {
+    const submitBtn = APIUtils.$element('submitBtn');
+    // Check if this is a continue action
+    if (submitBtn && submitBtn.textContent === 'Continue to Next Question') {
+        await continueToNext();
+        return;
+    }
+    // Check if this is an assess again action
+    if (submitBtn && submitBtn.textContent === 'Assess again') {
+        await handleAssessAgain();
+        return;
+    }
+    if (!moduleState.currentQuestion || moduleState.selectedAnswer === null) {
+        return;
+    }
+    if (submitBtn) {
+        submitBtn.textContent = 'Submitting...';
+        submitBtn.disabled = true;
+    }
+    try {
+        const answer = {
+            session_id: moduleState.session?.session_id || '',
+            question_id: moduleState.currentQuestion.id,
+            choice_index: moduleState.selectedAnswer
+        };
+        const evaluation = await submitAnswer(answer);
+        moduleState.isQuestionAnswered = true;
+        moduleState.lastEvaluation = evaluation; // Store for continueToNext
+        // Trigger preloading after question 3
+        if (moduleState.currentQuestion?.number === 3) {
+            try {
+                await APIUtils.ReadingAPI.preloadNextPassage(answer);
+                console.log('Next passage preloaded successfully');
+            }
+            catch (error) {
+                console.log('Preloading failed (non-critical):', error);
+            }
+        }
+        // Display results
+        displayEvaluationResults(evaluation);
+        // Check if session is finished or get next question from submit response
+        if (evaluation.finished) {
+            showSessionComplete(evaluation.summary?.correct || 0);
+        }
+        else if (evaluation.next_question) {
+            // Update submit button to continue button
+            if (submitBtn) {
+                submitBtn.textContent = 'Continue to Next Question';
+                submitBtn.disabled = false;
+            }
+        }
+    }
+    catch (error) {
+        console.error('Submission failed:', error);
+        const status = APIUtils.$element('status');
+        if (status)
+            status.textContent = 'Submission failed. Please try again.';
+        if (submitBtn) {
+            submitBtn.textContent = 'Submit Answer';
+            submitBtn.disabled = false;
+        }
+    }
+}
+/**
+ * Handle continue to next question
+ */
+async function continueToNext() {
+    if (!moduleState.session)
+        return;
+    const submitBtn = APIUtils.$element('submitBtn');
+    if (submitBtn) {
+        submitBtn.textContent = 'Loading...';
+        submitBtn.disabled = true;
+    }
+    try {
+        // Get next question from the stored response
+        const evaluation = moduleState.lastEvaluation;
+        if (!evaluation || !evaluation.next_question) {
+            throw new Error('No next question available');
+        }
+        if (evaluation.finished) {
+            showSessionComplete(evaluation.summary?.correct || 0);
+        }
+        else {
+            // Reset state for next question
+            moduleState.selectedAnswer = null;
+            moduleState.isQuestionAnswered = false;
+            moduleState.showResults = false;
+            // Hide results
+            hide('results');
+            // Display next question
+            if (evaluation.next_question) {
+                moduleState.currentQuestion = evaluation.next_question;
+                displayQuestion(evaluation.next_question);
+            }
+            // Update progress
+            updateProgress();
+        }
+    }
+    catch (error) {
+        console.error('Failed to get next question:', error);
+        const status = APIUtils.$element('status');
+        if (status)
+            status.textContent = 'Failed to load next question. Please try again.';
+        if (submitBtn) {
+            submitBtn.textContent = 'Continue to Next Question';
+            submitBtn.disabled = false;
+        }
+    }
+}
+/**
+ * Handle assess again functionality
+ */
+async function handleAssessAgain() {
+    const submitBtn = APIUtils.$element('submitBtn');
+    if (submitBtn) {
+        submitBtn.textContent = 'Starting...';
+        submitBtn.disabled = true;
+    }
+    try {
+        // Reset module state
+        moduleState.session = null;
+        moduleState.currentPassage = null;
+        moduleState.currentQuestion = null;
+        moduleState.selectedAnswer = null;
+        moduleState.isQuestionAnswered = false;
+        moduleState.showResults = false;
+        moduleState.isSessionActive = false;
+        moduleState.lastEvaluation = null;
+        // Hide results and assessment interface
+        hide('results');
+        hide('assessment-interface');
+        // Start new session with final level
+        const startLevel = moduleState.finalLevel || 'A2';
+        await startSession(startLevel);
+        // Show assessment interface
+        show('assessment-interface');
+        // Display first passage and question
+        if (moduleState.currentPassage) {
+            displayPassage(moduleState.currentPassage);
+        }
+        if (moduleState.currentQuestion) {
+            displayQuestion(moduleState.currentQuestion);
+        }
+        // Update progress
+        updateProgress();
+    }
+    catch (error) {
+        console.error('Failed to start new assessment:', error);
+        const status = APIUtils.$element('status');
+        if (status)
+            status.textContent = 'Failed to start new assessment. Please try again.';
+        if (submitBtn) {
+            submitBtn.textContent = 'Assess again';
+            submitBtn.disabled = false;
+        }
+    }
+}
+/**
+ * Handle login form submission
+ */
+async function handleLogin(event) {
+    event.preventDefault();
+    const usernameInput = APIUtils.$element('username');
+    const passwordInput = APIUtils.$element('password');
+    if (!usernameInput || !passwordInput)
+        return;
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    if (!username || !password) {
+        alert('Please enter both username and password');
+        return;
+    }
+    try {
+        await login(username, password);
+        const status = APIUtils.$element('status');
+        if (status)
+            status.textContent = 'Login successful!';
+        // UI state is managed by AuthUtils.updateUIForAuthStatus()
+    }
+    catch (error) {
+        const status = APIUtils.$element('status');
+        if (status)
+            status.textContent = 'Login failed. Please try again.';
+    }
+}
+/**
+ * Handle start session button click
+ */
+async function handleStartSession() {
+    const startBtn = APIUtils.$element('startBtn');
+    if (startBtn) {
+        startBtn.textContent = 'Starting...';
+        startBtn.disabled = true;
+    }
+    try {
+        // Use final level from previous assessment if available, otherwise default to A2
+        const startLevel = moduleState.finalLevel || 'A2';
+        const response = await startSession(startLevel);
+        // Hide start button and show assessment interface
+        hide('startBtn');
+        show('assessment-interface');
+        // Display first passage and question
+        if (moduleState.currentPassage) {
+            displayPassage(moduleState.currentPassage);
+        }
+        if (moduleState.currentQuestion) {
+            displayQuestion(moduleState.currentQuestion);
+        }
+        // Update progress
+        updateProgress();
+    }
+    catch (error) {
+        console.error('Start session failed:', error);
+        const status = APIUtils.$element('status');
+        if (status)
+            status.textContent = 'Failed to start session. Please try again.';
+        if (startBtn) {
+            startBtn.textContent = 'Start Reading Assessment';
+            startBtn.disabled = false;
+        }
+    }
+}
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+/**
+ * Initialize the reading module
+ */
+async function initializeReadingModule() {
+    // Initialize authentication first
+    await AuthUtils.initializeAuth();
+    // Set up event listeners
+    const loginForm = APIUtils.$element('loginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+    }
+    const startBtn = APIUtils.$element('startBtn');
+    if (startBtn) {
+        startBtn.addEventListener('click', handleStartSession);
+    }
+    const submitBtn = APIUtils.$element('submitBtn');
+    if (submitBtn) {
+        submitBtn.addEventListener('click', handleSubmitAnswer);
+    }
+    // Continue button functionality is now handled by submitBtn
+    // Authentication state is managed by AuthUtils.updateUIForAuthStatus()
+    // Initialize UI state
+    hide('assessment-interface');
+    hide('results');
+}
+// ============================================================================
+// MODULE EXPORTS
+// ============================================================================
+// Export functions for global access
+window.ReadingModule = {
+    initializeReadingModule,
+    handleLogin,
+    handleStartSession,
+    selectAnswer,
+    handleSubmitAnswer,
+    continueToNext,
+    handleAssessAgain,
+    displayPassage,
+    displayQuestion,
+    displayEvaluationResults,
+    showSessionComplete,
+    moduleState
+};
+// Initialize when DOM is loaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeReadingModule);
+}
+else {
+    initializeReadingModule();
+}

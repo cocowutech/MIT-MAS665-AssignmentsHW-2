@@ -1,0 +1,323 @@
+/**
+ * Speaking Module Specific Styles
+ * 
+ * This file contains styles specific to the speaking assessment module.
+ * It extends the shared base and component styles with speaking-specific elements.
+ * 
+ * @author ESL Assessment System
+ * @version 1.0
+ */
+
+/* ============================================================================
+   SPEAKING-SPECIFIC COMPONENTS
+   ============================================================================ */
+
+/* Recording controls */
+.recording-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin: 16px 0;
+    padding: 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+}
+
+.record-button {
+    background: #ef4444;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    min-width: 120px;
+}
+
+.record-button:hover {
+    background: #dc2626;
+}
+
+.record-button.recording {
+    background: #dc2626;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.record-button:disabled {
+    background: #6b7280;
+    cursor: not-allowed;
+}
+
+/* Recording indicator */
+.recording-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #1f1010;
+    border: 1px solid #ef4444;
+    border-radius: 6px;
+    color: #f87171;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.recording-dot {
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Timer display */
+.timer-display {
+    font-size: 24px;
+    font-weight: 700;
+    color: #f2f4f8;
+    text-align: center;
+    padding: 16px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+    margin: 12px 0;
+}
+
+.timer-display.preparation {
+    color: #fbbf24;
+}
+
+.timer-display.recording {
+    color: #ef4444;
+}
+
+/* Speaking prompt */
+.speaking-prompt {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 16px;
+    border-radius: 8px;
+    margin: 16px 0;
+    font-size: 16px;
+    line-height: 1.6;
+    color: #e5e7eb;
+}
+
+.prompt-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+    margin-bottom: 8px;
+}
+
+.prompt-text {
+    color: #c7d2fe;
+    margin-bottom: 12px;
+}
+
+.prompt-instructions {
+    font-size: 14px;
+    color: #93c5fd;
+    font-style: italic;
+}
+
+/* Audio visualization */
+.audio-visualizer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 60px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+    margin: 12px 0;
+    overflow: hidden;
+}
+
+.audio-bar {
+    width: 4px;
+    background: #2563eb;
+    margin: 0 1px;
+    border-radius: 2px;
+    transition: height 0.1s ease;
+}
+
+.audio-bar.active {
+    background: #ef4444;
+}
+
+/* Transcript display */
+.transcript-display {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 12px;
+    border-radius: 8px;
+    margin: 12px 0;
+    min-height: 100px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #9ca3af;
+}
+
+.transcript-display.recording {
+    color: #e5e7eb;
+}
+
+/* Evaluation results */
+.evaluation-results {
+    background: #111833;
+    border: 1px solid #1e2a55;
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 16px;
+}
+
+.evaluation-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.evaluation-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+    margin: 0;
+}
+
+.evaluation-score {
+    font-size: 24px;
+    font-weight: 700;
+    color: #22c55e;
+}
+
+.evaluation-breakdown {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.evaluation-item {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 8px 12px;
+    border-radius: 6px;
+    text-align: center;
+}
+
+.evaluation-item-label {
+    font-size: 12px;
+    color: #93c5fd;
+    margin-bottom: 4px;
+}
+
+.evaluation-item-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f2f4f8;
+}
+
+.evaluation-feedback {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 12px;
+    border-radius: 6px;
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #c7d2fe;
+}
+
+/* Progress indicator */
+.speaking-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 8px 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+}
+
+.progress-text {
+    font-size: 13px;
+    color: #93c5fd;
+    font-weight: 500;
+}
+
+/* Task navigation */
+.task-navigation {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 16px 0;
+    padding: 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+}
+
+.task-nav-button {
+    flex: 1;
+    max-width: 200px;
+}
+
+/* Level indicator */
+.level-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #93c5fd;
+}
+
+.level-badge {
+    background: #1e2a55;
+    color: #c7d2fe;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+@media (max-width: 768px) {
+    .recording-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .record-button {
+        min-width: auto;
+    }
+    
+    .timer-display {
+        font-size: 20px;
+    }
+    
+    .evaluation-breakdown {
+        grid-template-columns: 1fr;
+    }
+    
+    .task-navigation {
+        flex-direction: column;
+    }
+    
+    .task-nav-button {
+        max-width: none;
+    }
+}

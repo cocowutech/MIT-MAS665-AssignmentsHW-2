@@ -1,0 +1,471 @@
+/**
+ * Writing Module Specific Styles
+ * 
+ * This file contains styles specific to the writing assessment module.
+ * It extends the shared base and component styles with writing-specific elements.
+ * 
+ * @author ESL Assessment System
+ * @version 1.0
+ */
+
+/* ============================================================================
+   WRITING-SPECIFIC COMPONENTS
+   ============================================================================ */
+
+/* Writing prompt */
+.writing-prompt {
+    background: #0a0f1f;
+    border: 1px solid #22305f;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 16px 0;
+}
+
+.prompt-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.prompt-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+}
+
+.prompt-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.meta-item {
+    background: #0f1a39;
+    border: 1px solid #2a3a76;
+    color: #c7d2fe;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+}
+
+.prompt-body {
+    color: #c7d2fe;
+    line-height: 1.6;
+}
+
+.prompt-body p {
+    margin: 8px 0;
+}
+
+.prompt-body ul, .prompt-body ol {
+    margin: 8px 0 8px 20px;
+}
+
+.prompt-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.chip {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #0b1837;
+    border: 1px solid #1e2a55;
+    color: #93c5fd;
+    font-size: 12px;
+}
+
+.chip.struct {
+    color: #a7f3d0;
+    border-color: #115e59;
+    background: #062b2b;
+}
+
+.section-title {
+    font-weight: 600;
+    color: #c7d2fe;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+/* Writing editor */
+.writing-editor {
+    background: #111833;
+    border: 1px solid #1e2a55;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 16px 0;
+}
+
+.editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.editor-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f2f4f8;
+}
+
+.word-count {
+    font-size: 14px;
+    color: #93c5fd;
+    background: #0a0f1f;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #1e2a55;
+}
+
+.writing-textarea {
+    width: 100%;
+    min-height: 300px;
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #e5e7eb;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.writing-textarea:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+/* Progress indicator */
+.writing-progress {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 16px 0;
+    padding: 12px 16px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+}
+
+.progress-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.progress-text {
+    font-size: 14px;
+    color: #93c5fd;
+    font-weight: 500;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 8px;
+    background: #1e2a55;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 0 16px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #2563eb;
+    transition: width 0.3s ease;
+    border-radius: 4px;
+}
+
+/* Timer display */
+.writing-timer {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f2f4f8;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-variant-numeric: tabular-nums;
+}
+
+.writing-timer.warning {
+    color: #fbbf24;
+    border-color: #fbbf24;
+}
+
+.writing-timer.critical {
+    color: #ef4444;
+    border-color: #ef4444;
+    animation: pulse 1s ease-in-out infinite;
+}
+
+/* Results display */
+.writing-results {
+    background: #111833;
+    border: 1px solid #1e2a55;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 16px 0;
+}
+
+.results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.results-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+    margin: 0;
+}
+
+.results-score {
+    font-size: 24px;
+    font-weight: 700;
+    color: #22c55e;
+}
+
+/* Scoring section */
+.score-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #1e2a55;
+}
+
+.score-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.score-item {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+}
+
+.score-label {
+    font-size: 12px;
+    color: #93c5fd;
+    margin-bottom: 4px;
+}
+
+.score-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f2f4f8;
+}
+
+.comment-box {
+    background: #0a0f1f;
+    border: 1px solid #22305f;
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 16px;
+}
+
+.comment-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #93c5fd;
+    margin-bottom: 8px;
+}
+
+.comment-text {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #c7d2fe;
+}
+
+/* Inline annotations */
+.inline-annot {
+    background: #062b2b;
+    border-left: 3px solid #0ea5e9;
+    padding: 8px 12px;
+    margin: 8px 0;
+    border-radius: 0 4px 4px 0;
+}
+
+.annot-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #0ea5e9;
+    margin-bottom: 4px;
+}
+
+.annot-text {
+    font-size: 13px;
+    color: #c7d2fe;
+    line-height: 1.4;
+}
+
+/* Navigation controls */
+.writing-navigation {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 16px 0;
+    padding: 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+}
+
+.nav-button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    min-width: 100px;
+}
+
+.nav-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.small-btn {
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #e5e7eb;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.small-btn:hover {
+    background: #1e2a55;
+    border-color: #2563eb;
+}
+
+/* Level indicator */
+.writing-level {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #93c5fd;
+}
+
+.level-badge {
+    background: #1e2a55;
+    color: #c7d2fe;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* Session summary */
+.session-summary {
+    background: #111833;
+    border: 1px solid #1e2a55;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 16px 0;
+}
+
+.summary-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.summary-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.summary-stat {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.summary-stat-label {
+    font-size: 12px;
+    color: #93c5fd;
+    margin-bottom: 4px;
+}
+
+.summary-stat-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+@media (max-width: 768px) {
+    .writing-textarea {
+        min-height: 200px;
+        font-size: 13px;
+    }
+    
+    .progress-info {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .progress-bar {
+        margin: 0;
+    }
+    
+    .score-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .summary-stats {
+        grid-template-columns: 1fr;
+    }
+    
+    .writing-navigation {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .nav-button {
+        width: 100%;
+    }
+    
+    .prompt-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .editor-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+}

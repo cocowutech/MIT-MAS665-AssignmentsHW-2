@@ -1,0 +1,364 @@
+/**
+ * Listening Module Specific Styles
+ * 
+ * This file contains styles specific to the listening assessment module.
+ * It extends the shared base and component styles with listening-specific elements.
+ * 
+ * @author ESL Assessment System
+ * @version 1.0
+ */
+
+/* ============================================================================
+   LISTENING-SPECIFIC COMPONENTS
+   ============================================================================ */
+
+/* Audio playback controls */
+.audio-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 8px 0 12px 0;
+}
+
+.audio-controls button {
+    min-width: 80px;
+}
+
+/* Transcript toggle */
+.transcript-toggle {
+    background: #334155;
+    color: #c7d2fe;
+    border: 1px solid #1e2a55;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s ease;
+}
+
+.transcript-toggle:hover {
+    background: #475569;
+    border-color: #3756b3;
+}
+
+/* Transcript display */
+.transcript-display {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 8px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #9ca3af;
+}
+
+/* Clip header with badges */
+.clip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.clip-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+    margin: 0;
+}
+
+.clip-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+/* Listening-specific choice cards */
+.listening-choice-card {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 12px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-bottom: 8px;
+}
+
+.listening-choice-card:hover {
+    border-color: #3756b3;
+    background: #0b162d;
+}
+
+.listening-choice-card.selected {
+    border-color: #60a5fa;
+    background: #0b162d;
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+}
+
+.listening-choice-card.correct {
+    border-color: #10b981;
+    background: #0f1f16;
+}
+
+.listening-choice-card.incorrect {
+    border-color: #ef4444;
+    background: #1f1010;
+}
+
+.listening-choice-card.locked {
+    pointer-events: none;
+    opacity: 0.85;
+}
+
+/* Choice key styling for listening */
+.listening-choice-key {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: #1e2a55;
+    color: #c7d2fe;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    flex: 0 0 28px;
+    font-size: 14px;
+}
+
+.listening-choice-text {
+    color: #e5e7eb;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+/* Feedback styling */
+.listening-feedback {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.listening-feedback.correct {
+    background: #0f1f16;
+    border: 1px solid #10b981;
+    color: #22c55e;
+}
+
+.listening-feedback.incorrect {
+    background: #1f1010;
+    border: 1px solid #ef4444;
+    color: #f87171;
+}
+
+/* Progress indicator */
+.listening-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 8px 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+}
+
+.progress-text {
+    font-size: 13px;
+    color: #93c5fd;
+    font-weight: 500;
+}
+
+/* Session controls */
+.session-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 16px 0;
+    padding: 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+}
+
+.session-controls button {
+    flex: 1;
+    max-width: 200px;
+}
+
+/* Results display */
+.listening-results {
+    background: #111833;
+    border: 1px solid #1e2a55;
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 16px;
+}
+
+.results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.results-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f2f4f8;
+    margin: 0;
+}
+
+.results-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.result-stat {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 8px 12px;
+    border-radius: 6px;
+    text-align: center;
+}
+
+.result-stat-label {
+    font-size: 12px;
+    color: #93c5fd;
+    margin-bottom: 4px;
+}
+
+.result-stat-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f2f4f8;
+}
+
+/* Vocabulary and structures display */
+.targets-section {
+    margin-top: 16px;
+}
+
+.targets-title {
+    font-size: 14px;
+    color: #c7d2fe;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.targets-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.target-pill {
+    background: #1e2a55;
+    color: #c7d2fe;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    border: 1px solid #334155;
+}
+
+/* Per-item results */
+.per-item-results {
+    margin-top: 16px;
+}
+
+.per-item-result {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 6px;
+    margin-bottom: 6px;
+}
+
+.per-item-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.per-item-number {
+    font-size: 12px;
+    color: #93c5fd;
+    font-weight: 500;
+}
+
+.per-item-status {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.per-item-status.correct {
+    color: #22c55e;
+}
+
+.per-item-status.incorrect {
+    color: #ef4444;
+}
+
+.per-item-level {
+    font-size: 11px;
+    color: #9ca3af;
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+@media (max-width: 768px) {
+    .clip-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .clip-badges {
+        align-self: stretch;
+        justify-content: center;
+    }
+    
+    .listening-choice-card {
+        padding: 10px;
+        gap: 10px;
+    }
+    
+    .listening-choice-key {
+        width: 24px;
+        height: 24px;
+        font-size: 12px;
+    }
+    
+    .session-controls {
+        flex-direction: column;
+    }
+    
+    .session-controls button {
+        max-width: none;
+    }
+    
+    .results-stats {
+        grid-template-columns: 1fr;
+    }
+    
+    .per-item-result {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+}

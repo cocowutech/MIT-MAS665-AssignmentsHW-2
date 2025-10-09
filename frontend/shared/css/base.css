@@ -1,0 +1,272 @@
+/**
+ * Base CSS Styles for ESL Assessment System
+ * 
+ * This file contains the foundational styles shared across all modules.
+ * It provides consistent theming, typography, and base component styles.
+ * 
+ * @author ESL Assessment System
+ * @version 1.0
+ */
+
+/* ============================================================================
+   CSS RESET AND BASE STYLES
+   ============================================================================ */
+
+/* Base styling with dark theme */
+body { 
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; 
+    margin: 0; 
+    padding: 0; 
+    background: #0b1020; 
+    color: #f2f4f8; 
+    line-height: 1.6;
+}
+
+/* Main container with responsive max-width */
+.container { 
+    max-width: 900px; 
+    margin: 0 auto; 
+    padding: 24px; 
+}
+
+/* ============================================================================
+   CARD COMPONENTS
+   ============================================================================ */
+
+/* Card component styling */
+.card { 
+    background: #111833; 
+    border: 1px solid #1e2a55; 
+    border-radius: 12px; 
+    padding: 20px; 
+    margin-top: 16px; 
+}
+
+/* ============================================================================
+   UTILITY CLASSES
+   ============================================================================ */
+
+/* Hide elements */
+.hidden {
+    display: none !important;
+}
+
+/* ============================================================================
+   FORM ELEMENTS
+   ============================================================================ */
+
+/* Form element styling */
+label { 
+    display: block; 
+    margin: 8px 0 4px; 
+    font-size: 14px; 
+    color: #c7d2fe; 
+}
+
+input, select, textarea { 
+    width: 100%; 
+    padding: 10px 12px; 
+    border-radius: 8px; 
+    border: 1px solid #334155; 
+    background: #0f172a; 
+    color: #e5e7eb; 
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+}
+
+/* ============================================================================
+   BUTTONS
+   ============================================================================ */
+
+/* Button styling with different variants */
+button { 
+    background: #2563eb; 
+    color: white; 
+    border: none; 
+    padding: 10px 14px; 
+    border-radius: 8px; 
+    cursor: pointer; 
+    font-size: 14px;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+}
+
+button:hover {
+    background: #1d4ed8;
+}
+
+button.secondary { 
+    background: #334155; 
+}
+
+button.secondary:hover {
+    background: #475569;
+}
+
+button:disabled { 
+    opacity: 0.6; 
+    cursor: not-allowed; 
+}
+
+button:disabled:hover {
+    background: #2563eb;
+}
+
+/* ============================================================================
+   LAYOUT UTILITIES
+   ============================================================================ */
+
+/* Flexbox layout utilities */
+.row { 
+    display: flex; 
+    gap: 12px; 
+    align-items: center; 
+}
+
+.row > * { 
+    flex: 1; 
+}
+
+.flex { 
+    display: flex; 
+    gap: 8px; 
+    align-items: center; 
+    flex-wrap: wrap; 
+}
+
+/* Header layout */
+.header { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+}
+
+/* ============================================================================
+   TYPOGRAPHY
+   ============================================================================ */
+
+/* Small text styling */
+.small { 
+    color: #93c5fd; 
+    font-size: 12px; 
+}
+
+/* Section title styling */
+.section-title { 
+    margin: 0 0 8px 0; 
+    font-size: 18px;
+    font-weight: 600;
+}
+
+/* ============================================================================
+   LINKS AND NAVIGATION
+   ============================================================================ */
+
+/* Link styling */
+a { 
+    color: #93c5fd; 
+    text-decoration: none;
+}
+
+a:hover {
+    color: #bfdbfe;
+    text-decoration: underline;
+}
+
+/* ============================================================================
+   BADGES AND PILLS
+   ============================================================================ */
+
+/* Badge component */
+.badge { 
+    background: #0a0f1f; 
+    border: 1px solid #1e2a55; 
+    padding: 2px 8px; 
+    border-radius: 999px; 
+    font-size: 12px; 
+    color: #93c5fd; 
+}
+
+/* Pill component */
+.pill { 
+    display: inline-block; 
+    background: #1e2a55; 
+    color: #c7d2fe; 
+    padding: 2px 8px; 
+    border-radius: 999px; 
+    font-size: 12px; 
+    margin-left: 6px; 
+}
+
+/* ============================================================================
+   STATUS INDICATORS
+   ============================================================================ */
+
+/* Success/error color classes */
+.ok { 
+    color: #22c55e; 
+}
+
+.bad { 
+    color: #ef4444; 
+}
+
+/* ============================================================================
+   CODE AND PRE-FORMATTED TEXT
+   ============================================================================ */
+
+/* Code styling */
+code {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    color: #e5e7eb;
+}
+
+/* Pre-formatted text */
+pre { 
+    white-space: pre-wrap; 
+    word-break: break-word; 
+    background: #0a0f1f; 
+    border: 1px solid #1e2a55; 
+    padding: 12px; 
+    border-radius: 8px; 
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    overflow-x: auto;
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .container {
+        padding: 16px;
+    }
+    
+    .row {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .row > * {
+        flex: none;
+    }
+    
+    .header {
+        flex-direction: column;
+        gap: 8px;
+        text-align: center;
+    }
+}
