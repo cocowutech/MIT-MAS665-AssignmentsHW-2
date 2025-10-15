@@ -372,42 +372,148 @@
     color: #22c55e;
 }
 
-.evaluation-breakdown {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+.overall-level {
+    display: flex;
+    align-items: center;
     gap: 8px;
     margin-bottom: 16px;
-}
-
-.evaluation-item {
+    padding: 8px 12px;
     background: #0a0f1f;
     border: 1px solid #1e2a55;
-    padding: 8px 12px;
     border-radius: 6px;
-    text-align: center;
 }
 
-.evaluation-item-label {
-    font-size: 12px;
+.comprehensive-feedback {
+    margin-bottom: 20px;
+}
+
+.detailed-breakdown {
+    margin-bottom: 20px;
+}
+
+.detailed-breakdown h4 {
+    color: #f2f4f8;
+    margin-bottom: 12px;
+}
+
+.breakdown-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+}
+
+.breakdown-item {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.breakdown-label {
+    font-size: 14px;
+    font-weight: 600;
     color: #93c5fd;
     margin-bottom: 4px;
 }
 
-.evaluation-item-value {
-    font-size: 16px;
-    font-weight: 600;
-    color: #f2f4f8;
+.breakdown-score {
+    font-size: 18px;
+    font-weight: 700;
+    color: #60a5fa;
+    margin-bottom: 4px;
 }
 
-.evaluation-feedback {
+.breakdown-description {
+    font-size: 12px;
+    color: #9ca3af;
+    margin-bottom: 8px;
+}
+
+.progress-bar {
+    height: 6px;
+    background: #1e2a55;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #60a5fa);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.strengths-improvements {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.strengths, .improvements {
     background: #0a0f1f;
     border: 1px solid #1e2a55;
+    border-radius: 8px;
     padding: 12px;
-    border-radius: 6px;
-    margin-top: 12px;
-    font-size: 14px;
-    line-height: 1.5;
-    color: #c7d2fe;
+}
+
+.strengths h4 {
+    color: #22c55e;
+    margin-bottom: 8px;
+}
+
+.improvements h4 {
+    color: #f59e0b;
+    margin-bottom: 8px;
+}
+
+.strengths ul, .improvements ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.strengths li {
+    color: #e5e7eb;
+    margin-bottom: 4px;
+}
+
+.improvements li {
+    color: #e5e7eb;
+    margin-bottom: 4px;
+}
+
+.technical-details {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.technical-details h4 {
+    color: #f2f4f8;
+    margin-bottom: 12px;
+}
+
+.technical-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.technical-item {
+    text-align: center;
+}
+
+.technical-label {
+    font-size: 12px;
+    color: #9ca3af;
+    margin-bottom: 4px;
+}
+
+.technical-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: #60a5fa;
 }
 
 /* Progress indicator */

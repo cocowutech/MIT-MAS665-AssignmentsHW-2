@@ -370,13 +370,6 @@ async function beginRecording(recordSeconds) {
                 audioPlayback.src = URL.createObjectURL(blob);
             }
             stream.getTracks().forEach(track => track.stop());
-            
-            // Show the audio player after the blob is created
-            const audioPlayer = APIUtils.$element('audioPlayer');
-            if (audioPlayer && moduleState.recordedAudioBlob) {
-                audioPlayer.classList.remove('hidden');
-                setupAudioPlayer(audioPlayback);
-            }
         };
         moduleState.mediaRecorder.start();
         // Initialize speech recognition
@@ -431,7 +424,15 @@ function stopRecording() {
     if (recordingStatus) {
         recordingStatus.innerHTML = '<div class="recording-dot" style="background-color: #10b981;"></div><span>Recording Complete</span>';
     }
-    // Note: Audio player is now shown in the mediaRecorder.onstop callback
+    // Enable custom audio player
+    const audioPlayer = APIUtils.$element('audioPlayer');
+    const audioPlayback = APIUtils.$element('audioPlayback');
+    if (audioPlayer && audioPlayback && moduleState.recordedAudioBlob) {
+        const audioUrl = URL.createObjectURL(moduleState.recordedAudioBlob);
+        audioPlayback.src = audioUrl;
+        audioPlayer.classList.remove('hidden');
+        setupAudioPlayer(audioPlayback);
+    }
     const recordBtn = APIUtils.$element('recordBtn');
     if (recordBtn) {
         recordBtn.textContent = 'Submit';
@@ -864,25 +865,6 @@ function showSessionComplete(finalScore) {
 // EVENT HANDLERS
 // ============================================================================
 /**
- * Handle skip preparation button click
- * Skips the preparation time and moves directly to recording
- */
-function handleSkipPrep() {
-    // Clear the preparation countdown if it's running
-    if (moduleState.countdownInterval) {
-        clearInterval(moduleState.countdownInterval);
-        moduleState.countdownInterval = null;
-    }
-    
-    // Get the recording time from the timer display
-    const recordTimer = APIUtils.$element('recordTimer');
-    const recordSeconds = parseInt(recordTimer?.textContent || '60', 10);
-    
-    // Move directly to recording
-    showRecordUI(recordSeconds);
-}
-
-/**
  * Handle record button click
  */
 function handleRecordClick() {
@@ -984,12 +966,6 @@ async function initializeSpeakingModule() {
     if (recordBtn) {
         recordBtn.addEventListener('click', handleRecordClick);
     }
-    
-    const skipPrepBtn = APIUtils.$element('skipPrepBtn');
-    if (skipPrepBtn) {
-        skipPrepBtn.addEventListener('click', handleSkipPrep);
-    }
-    
     // Authentication state is managed by AuthUtils.updateUIForAuthStatus()
     // Initialize UI state
     hide('taskInterface');
@@ -1006,7 +982,6 @@ window.SpeakingModule = {
     handleLogin,
     handleStartSession,
     handleRecordClick,
-    handleSkipPrep,
     startPrepAndRecord,
     beginRecording,
     stopRecording,
