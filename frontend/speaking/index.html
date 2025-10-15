@@ -129,6 +129,7 @@
                         <div id="prepTimer" class="timer">30</div>
                     </div>
                     <p>Prepare your response. Recording will start automatically.</p>
+                    <button id="skipPrepBtn" class="secondary-btn">Skip Preparation</button>
                 </div>
 
                 <!-- Recording Phase -->
@@ -158,18 +159,18 @@
                     <!-- Custom Audio Player -->
                     <div id="audioPlayer" class="audio-player hidden">
                         <div class="audio-player-header">
-                            <span>Your Recording</span>
+                            <span>🎧 Your Recording - Click play to listen</span>
                         </div>
                         <audio id="audioPlayback" preload="metadata"></audio>
                         <div class="audio-controls">
                             <button id="playBtn" class="audio-btn">
-                                <span>▶</span>
+                                <span>▶ Play</span>
                             </button>
                             <button id="pauseBtn" class="audio-btn hidden">
-                                <span>⏸</span>
+                                <span>⏸ Pause</span>
                             </button>
                             <button id="restartBtn" class="audio-btn">
-                                <span>⏮</span>
+                                <span>⏮ Restart</span>
                             </button>
                             <div class="audio-progress">
                                 <div class="audio-progress-bar">

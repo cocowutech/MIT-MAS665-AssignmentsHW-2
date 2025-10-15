@@ -32,6 +32,8 @@ class ReadingModuleState {
         this.isSessionActive = false;
         this.lastEvaluation = null;
         this.finalLevel = null;
+        // Preloading state
+        this.nextPassagePreloaded = false;
         this.initializeAuth();
     }
     /**
@@ -77,6 +79,7 @@ class ReadingModuleState {
         this.isQuestionAnswered = false;
         this.showResults = false;
         this.isSessionActive = false;
+        this.nextPassagePreloaded = false;
     }
     /**
      * Start question timer
@@ -193,7 +196,8 @@ async function startSession(startLevel = 'A2') {
             passage_index: response.passage_index,
             max_passages: response.max_passages,
             questions_per_passage: response.questions_per_passage,
-            total_questions: response.total_questions
+            total_questions: response.total_questions,
+            num_asked: 1 // Start with 1 since the first question is already loaded
         };
         moduleState.currentPassage = {
             text: response.passage,
@@ -297,6 +301,9 @@ function displayQuestion(question) {
         submitBtn.textContent = 'Submit Answer';
         submitBtn.disabled = true;
     }
+    
+    // Start preloading the next question after a short delay
+    preloadNextQuestion();
 }
 /**
  * Update progress display
@@ -308,7 +315,8 @@ function updateProgress() {
     if (!progressDiv)
         return;
     const totalQuestions = moduleState.session?.total_questions || 15;
-    const currentQuestion = moduleState.currentQuestion?.number || 1;
+    // Use the actual number of questions asked from the session state
+    const currentQuestion = moduleState.session?.num_asked || moduleState.currentQuestion?.number || 1;
     const progress = calculateProgress(currentQuestion, totalQuestions);
     progressDiv.innerHTML = `
         <div class="reading-progress">
@@ -335,6 +343,8 @@ function displayEvaluationResults(evaluation) {
         return;
     const isCorrect = evaluation.correct;
     const scoreColor = isCorrect ? '#22c55e' : '#ef4444';
+    // Use the total questions from the session state or default to 15
+    const totalQuestions = moduleState.session?.total_questions || 15;
     resultsDiv.innerHTML = `
         <div class="reading-results">
             <div class="results-header">
@@ -346,7 +356,7 @@ function displayEvaluationResults(evaluation) {
             <div class="results-breakdown">
                 <div class="result-item">
                     <div class="result-label">Progress</div>
-                    <div class="result-value">${evaluation.asked}/${evaluation.asked + evaluation.remaining}</div>
+                    <div class="result-value">${evaluation.asked}/${totalQuestions}</div>
                 </div>
                 <div class="result-item">
                     <div class="result-label">Time</div>
@@ -376,6 +386,7 @@ function showSessionComplete(finalScore) {
         return;
     const sessionTime = Date.now() - moduleState.sessionStartTime;
     const finalLevel = moduleState.lastEvaluation?.updated_target_cefr || moduleState.session?.target_cefr || 'A2';
+    const totalQuestions = moduleState.session?.total_questions || 15;
     // Store final level for assess again functionality
     moduleState.finalLevel = finalLevel;
     resultsDiv.innerHTML = `
@@ -384,11 +395,11 @@ function showSessionComplete(finalScore) {
             <div class="summary-stats">
                 <div class="summary-stat">
                     <div class="summary-stat-label">Final Score</div>
-                    <div class="summary-stat-value">${finalScore}/100</div>
+                    <div class="summary-stat-value">${finalScore}/${totalQuestions}</div>
                 </div>
                 <div class="summary-stat">
-                    <div class="summary-stat-label">Questions</div>
-                    <div class="summary-stat-value">${moduleState.session?.total_questions || 0}</div>
+                    <div class="summary-stat-label">Percentage</div>
+                    <div class="summary-stat-value">${Math.round((finalScore / totalQuestions) * 100)}%</div>
                 </div>
                 <div class="summary-stat">
                     <div class="summary-stat-label">Time Taken</div>
@@ -419,6 +430,54 @@ function showSessionComplete(finalScore) {
     moduleState.showResults = true;
     moduleState.isSessionActive = false;
 }
+// ============================================================================
+// PRELOADING FUNCTIONS
+// ============================================================================
+/**
+ * Preload the next question in the background
+ */
+async function preloadNextQuestion() {
+    if (!moduleState.session || !moduleState.currentQuestion) {
+        return;
+    }
+    
+    // Don't preload if we're already at the last question
+    if (moduleState.session.num_asked >= moduleState.session.total_questions) {
+        return;
+    }
+    
+    try {
+        // Use a timeout to ensure we don't interfere with the current question
+        setTimeout(async () => {
+            try {
+                // Check if we still have an active session and haven't moved to a new question
+                if (!moduleState.session || !moduleState.currentQuestion || 
+                    moduleState.session.num_asked >= moduleState.session.total_questions ||
+                    moduleState.isQuestionAnswered) {
+                    return;
+                }
+                
+                // Preload the next passage if we're at question 3 or later
+                if (moduleState.currentQuestion.number >= 3 && !moduleState.nextPassagePreloaded) {
+                    const answer = {
+                        session_id: moduleState.session.session_id,
+                        question_id: moduleState.currentQuestion.id,
+                        choice_index: 0 // Dummy value, won't be used
+                    };
+                    
+                    await APIUtils.ReadingAPI.preloadNextPassage(answer);
+                    moduleState.nextPassagePreloaded = true;
+                    console.log('Next passage preloaded successfully');
+                }
+            } catch (error) {
+                console.log('Preloading failed (non-critical):', error);
+            }
+        }, 2000); // Start preloading after 2 seconds
+    } catch (error) {
+        console.log('Error setting up preload:', error);
+    }
+}
+
 // ============================================================================
 // EVENT HANDLERS
 // ============================================================================
@@ -475,6 +534,20 @@ async function handleSubmitAnswer() {
         const evaluation = await submitAnswer(answer);
         moduleState.isQuestionAnswered = true;
         moduleState.lastEvaluation = evaluation; // Store for continueToNext
+        // Update the number of questions asked from the evaluation response
+        moduleState.session.num_asked = evaluation.asked;
+        // Update session state with new passage index if available
+        if (evaluation.passage_index !== undefined) {
+            moduleState.session.passage_index = evaluation.passage_index;
+        }
+        // Update passage if there's a new one
+        if (evaluation.new_passage) {
+            moduleState.currentPassage = {
+                text: evaluation.new_passage,
+                index: evaluation.passage_index
+            };
+            displayPassage(moduleState.currentPassage);
+        }
         // Trigger preloading after question 3
         if (moduleState.currentQuestion?.number === 3) {
             try {
@@ -535,6 +608,20 @@ async function continueToNext() {
             moduleState.selectedAnswer = null;
             moduleState.isQuestionAnswered = false;
             moduleState.showResults = false;
+            // Update the number of questions asked from the evaluation response
+            moduleState.session.num_asked = evaluation.asked;
+            // Update session state with new passage index if available
+            if (evaluation.passage_index !== undefined) {
+                moduleState.session.passage_index = evaluation.passage_index;
+            }
+            // Update passage if there's a new one
+            if (evaluation.new_passage) {
+                moduleState.currentPassage = {
+                    text: evaluation.new_passage,
+                    index: evaluation.passage_index
+                };
+                displayPassage(moduleState.currentPassage);
+            }
             // Hide results
             hide('results');
             // Display next question
@@ -697,6 +784,12 @@ async function initializeReadingModule() {
     // Initialize UI state
     hide('assessment-interface');
     hide('results');
+    
+    // Update the starting level display with the final level from previous assessment
+    const startingLevelElement = APIUtils.$element('startingLevel');
+    if (startingLevelElement && moduleState.finalLevel) {
+        startingLevelElement.textContent = moduleState.finalLevel;
+    }
 }
 // ============================================================================
 // MODULE EXPORTS

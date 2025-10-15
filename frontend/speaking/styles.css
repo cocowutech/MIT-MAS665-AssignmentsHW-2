@@ -17,14 +17,16 @@
     margin: 16px 0;
     padding: 16px;
     background: #0a0f1f;
-    border: 1px solid #1e2a55;
+    border: 2px solid #3756b3;
     border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .audio-player-header {
     margin-bottom: 12px;
     font-weight: 600;
-    color: #f2f4f8;
+    color: #60a5fa;
+    font-size: 16px;
 }
 
 .audio-controls {
@@ -49,8 +51,18 @@
     justify-content: center;
 }
 
+.audio-btn:first-child {
+    background: #22c55e;
+    font-weight: 600;
+    min-width: 100px;
+}
+
 .audio-btn:hover {
     background: #4c6dd6;
+}
+
+.audio-btn:first-child:hover {
+    background: #16a34a;
 }
 
 .audio-btn:disabled {
@@ -164,6 +176,28 @@
     background: #0a0f1f;
     border: 1px solid #1e2a55;
     border-radius: 8px;
+}
+
+.secondary-btn {
+    background: #6b7280;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    margin-top: 12px;
+}
+
+.secondary-btn:hover {
+    background: #4b5563;
+}
+
+.secondary-btn:disabled {
+    background: #374151;
+    cursor: not-allowed;
 }
 
 .record-button {
