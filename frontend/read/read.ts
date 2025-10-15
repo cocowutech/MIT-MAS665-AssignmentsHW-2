@@ -104,7 +104,7 @@ interface ReadingSessionResponse {
 // GLOBAL DECLARATIONS
 // ============================================================================
 
-declare const AuthUtils: any;
+import { authState, authenticateUser, logout, updateAuthHeader, updateUIForAuthStatus, initializeAuth } from '../shared/js/auth.js';
 declare const APIUtils: any;
 
 // ============================================================================
@@ -115,10 +115,6 @@ declare const APIUtils: any;
  * Centralized state management for the reading module
  */
 class ReadingModuleState {
-    // Authentication state
-    public token: string | null = localStorage.getItem('token');
-    public username: string | null = localStorage.getItem('username');
-    
     // Session state
     public session: ReadingSession | null = null;
     public currentPassage: ReadingPassage | null = null;
@@ -135,40 +131,6 @@ class ReadingModuleState {
     public finalLevel: string | null = null;
     
     constructor() {
-        this.initializeAuth();
-    }
-    
-    /**
-     * Initialize authentication state
-     */
-    private initializeAuth(): void {
-        if (this.token && this.username) {
-            AuthUtils.updateAuthHeader();
-            AuthUtils.updateUIForAuthStatus();
-        }
-    }
-    
-    /**
-     * Update authentication state
-     */
-    public updateAuth(token: string, username: string): void {
-        this.token = token;
-        this.username = username;
-        localStorage.setItem('token', token);
-        localStorage.setItem('username', username);
-        AuthUtils.updateAuthHeader();
-        AuthUtils.updateUIForAuthStatus();
-    }
-    
-    /**
-     * Clear authentication state
-     */
-    public clearAuth(): void {
-        this.token = null;
-        this.username = null;
-        localStorage.removeItem('token');
-        localStorage.removeItem('username');
-        AuthUtils.updateUIForAuthStatus();
     }
     
     /**
@@ -265,64 +227,12 @@ function calculateProgress(current: number, total: number): number {
 // AUTHENTICATION FUNCTIONS
 // ============================================================================
 
-/**
- * Authenticate user with backend and store token
- * Backend: POST /auth/token (auth.py:login)
- * @param username - User login name
- * @param password - User password
- * @returns JWT access token
- * @throws Error if authentication fails
- */
-async function login(username: string, password: string): Promise<string> {
-    try {
-        const result = await AuthUtils.authenticateUser(username, password);
-        if (result.success) {
-            // AuthUtils already handles token storage and UI updates
-            return AuthUtils.authState.token;
-        } else {
-            throw new Error(result.error || 'Login failed');
-        }
-    } catch (error) {
-        throw new Error('Login failed');
-    }
-}
 
 // ============================================================================
 // READING SESSION FUNCTIONS
 // ============================================================================
 
-/**
- * Initialize a new reading assessment session
- * Backend: POST /read/start (read.py:start)
- * @param startLevel - CEFR level to start the assessment with
- * @returns Session data with first reading task
- * @throws Error if session initialization fails
- */
-async function startSession(startLevel: string = 'A2'): Promise<ReadingSessionResponse> {
-    try {
-        const response = await APIUtils.ReadingAPI.startSession(startLevel);
-        // Backend returns data at top level, not nested under 'session'
-        moduleState.session = {
-            session_id: response.session_id,
-            target_cefr: response.target_cefr,
-            cambridge_level: response.cambridge_level,
-            passage_index: response.passage_index,
-            max_passages: response.max_passages,
-            questions_per_passage: response.questions_per_passage,
-            total_questions: response.total_questions
-        };
-        moduleState.currentPassage = {
-            text: response.passage,
-            index: response.passage_index
-        };
-        moduleState.currentQuestion = response.question;
-        moduleState.sessionStartTime = Date.now();
-        moduleState.isSessionActive = true;
-        return response;
-    } catch (error) {
-        throw new Error('Failed to start session');
-    }
-}
+
 
 /**
  * Submit reading answer for evaluation
@@ -735,7 +645,25 @@ async function handleAssessAgain(): Promise<void> {
         
         // Start new session with final level
         const startLevel = moduleState.finalLevel || 'A2';
-        await startSession(startLevel);
+        const response = await APIUtils.ReadingAPI.startSession(startLevel);
+        
+        // Backend returns data at top level, not nested under 'session'
+        moduleState.session = {
+            session_id: response.session_id,
+            target_cefr: response.target_cefr,
+            cambridge_level: response.cambridge_level,
+            passage_index: response.passage_index,
+            max_passages: response.max_passages,
+            questions_per_passage: response.questions_per_passage,
+            total_questions: response.total_questions
+        };
+        moduleState.currentPassage = {
+            text: response.passage,
+            index: response.passage_index
+        };
+        moduleState.currentQuestion = response.question;
+        moduleState.sessionStartTime = Date.now();
+        moduleState.isSessionActive = true;
         
         // Show assessment interface
         show('assessment-interface');
@@ -764,94 +692,45 @@ async function handleAssessAgain(): Promise<void> {
 }
 
 /**
- * Handle login form submission
- */
-async function handleLogin(event: Event): Promise<void> {
-    event.preventDefault();
-    
-    const usernameInput = APIUtils.$element('username') as HTMLInputElement;
-    const passwordInput = APIUtils.$element('password') as HTMLInputElement;
-    
-    if (!usernameInput || !passwordInput) return;
-    
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
-    
-    if (!username || !password) {
-        alert('Please enter both username and password');
-        return;
-    }
-    
-    try {
-        await login(username, password);
-        const status = APIUtils.$element('status');
-        if (status) status.textContent = 'Login successful!';
-        
-        // UI state is managed by AuthUtils.updateUIForAuthStatus()
-        
-    } catch (error) {
-        const status = APIUtils.$element('status');
-        if (status) status.textContent = 'Login failed. Please try again.';
-    }
-}
-
-/**
- * Handle start session button click
- */
-async function handleStartSession(): Promise<void> {
-    const startBtn = APIUtils.$element('startBtn');
-    if (startBtn) {
-        startBtn.textContent = 'Starting...';
-        (startBtn as HTMLButtonElement).disabled = true;
-    }
-    
-    try {
-        // Use final level from previous assessment if available, otherwise default to A2
-        const startLevel = moduleState.finalLevel || 'A2';
-        const response = await startSession(startLevel);
-        
-        // Hide start button and show assessment interface
-        hide('startBtn');
-        show('assessment-interface');
-        
-        // Display first passage and question
-        if (moduleState.currentPassage) {
-            displayPassage(moduleState.currentPassage);
-        }
-        if (moduleState.currentQuestion) {
-            displayQuestion(moduleState.currentQuestion);
-        }
-        
-        // Update progress
-        updateProgress();
-        
-    } catch (error) {
-        console.error('Start session failed:', error);
-        const status = APIUtils.$element('status');
-        if (status) status.textContent = 'Failed to start session. Please try again.';
-        
-        if (startBtn) {
-            startBtn.textContent = 'Start Reading Assessment';
-            (startBtn as HTMLButtonElement).disabled = false;
-        }
-    }
-}
-
-// ============================================================================
-// INITIALIZATION
-// ============================================================================
-
-/**
  * Initialize the reading module
  */
 async function initializeReadingModule(): Promise<void> {
     // Initialize authentication first
-    await AuthUtils.initializeAuth();
+    await initializeAuth();
     
     // Set up event listeners
-    const loginForm = APIUtils.$element('loginForm');
-    if (loginForm) {
-        loginForm.addEventListener('submit', handleLogin);
+    const loginBtn = APIUtils.$element('loginBtn');
+    if (loginBtn) {
+        loginBtn.addEventListener('click', async () => {
+            const usernameInput = APIUtils.$element('username') as HTMLInputElement;
+            const passwordInput = APIUtils.$element('password') as HTMLInputElement;
+            const loginMsgElement = APIUtils.$element('loginMsg') as HTMLElement;
+
+            if (!usernameInput || !passwordInput || !loginMsgElement) return;
+
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!username || !password) {
+                loginMsgElement.className = 'message error';
+                loginMsgElement.textContent = 'Please enter both username and password';
+                return;
+            }
+
+            try {
+                const authResult = await authenticateUser(username, password);
+                if (authResult.success) {
+                    loginMsgElement.className = 'message success';
+                    loginMsgElement.textContent = `Successfully logged in as ${authState.username}!`;
+                } else {
+                    loginMsgElement.className = 'message error';
+                    loginMsgElement.textContent = `Login failed: ${authResult.error || 'Unknown error'}`;
+                }
+            } catch (error) {
+                loginMsgElement.className = 'message error';
+                loginMsgElement.textContent = `Login failed: ${(error as Error).message}`;
+            }
+        });
     }
     
     const startBtn = APIUtils.$element('startBtn');
@@ -866,7 +745,7 @@ async function initializeReadingModule(): Promise<void> {
     
     // Continue button functionality is now handled by submitBtn
     
-    // Authentication state is managed by AuthUtils.updateUIForAuthStatus()
+    // Authentication state is managed by updateUIForAuthStatus()
     
     // Initialize UI state
     hide('assessment-interface');

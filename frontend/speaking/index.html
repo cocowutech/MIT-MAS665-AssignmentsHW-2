@@ -48,10 +48,10 @@
     <!-- Module-specific CSS -->
     <link rel="stylesheet" href="styles.css">
     <!-- Shared JavaScript -->
-    <script src="../shared/js/auth.js?v=20251026"></script>
-    <script src="../shared/js/api.js?v=20251026"></script>
+    <script type="module" src="../shared/js/auth.js"></script>
+    <script type="module" src="../shared/js/api.js"></script>
     <!-- Module-specific JavaScript -->
-    <script src="speaking.js?v=20251026"></script>
+    <script type="module" src="speaking.js"></script>
     </head>
 <body>
     <div class="container">
@@ -75,21 +75,20 @@
         <!-- Login Form -->
         <div id="login-card" class="card">
             <h2>Login</h2>
-            <form id="loginForm">
             <div class="row">
                 <div>
-                        <label for="username">Username</label>
-                        <input id="username" type="text" placeholder="username" value="guest" required>
-                    </div>
-                    <div>
-                        <label for="password">Password</label>
-                        <input id="password" type="password" placeholder="password" value="any" required>
-                    </div>
+                    <label for="username">Username</label>
+                    <input id="username" type="text" placeholder="username" value="guest" required>
                 </div>
-                <div style="margin-top:12px">
-                    <button type="submit">Login</button>
+                <div>
+                    <label for="password">Password</label>
+                    <input id="password" type="password" placeholder="password" value="any" required>
                 </div>
-            </form>
+            </div>
+            <div style="margin-top:12px">
+                <button id="loginBtn">Login</button>
+                <span id="loginMsg" class="small" style="margin-left:8px"></span>
+            </div>
         </div>
 
         <!-- Main Interface -->
