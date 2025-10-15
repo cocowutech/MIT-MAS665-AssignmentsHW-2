@@ -1,0 +1,25 @@
+{
+  "name": "placement-agent-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for Adaptive Placement Agent",
+  "main": "index.html",
+  "scripts": {
+    "build": "./build.sh",
+    "build:tsc": "tsc",
+    "watch": "tsc --watch",
+    "serve": "python3 -m http.server 8000",
+    "clean": "rm -rf dist/",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "keywords": [
+    "typescript",
+    "placement-agent",
+    "adaptive-learning",
+    "esl-assessment"
+  ],
+  "author": "ESL Assessment System",
+  "license": "MIT"
+}
