@@ -14,6 +14,10 @@ fi
 # Run the install_dependencies script with proper sudo handling
 $SCRIPT_DIR/install_dependencies.sh
 
+# Clean and rebuild all frontend files
+echo "[INFO] Cleaning and rebuilding all frontend files..."
+$SCRIPT_DIR/clean_and_rebuild.sh
+
 # Run the application
 $SCRIPT_DIR/run.sh
 

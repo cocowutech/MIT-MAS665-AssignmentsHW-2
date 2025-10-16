@@ -1050,6 +1050,24 @@ function showSessionComplete(finalScore: number): void {
 // ============================================================================
 
 /**
+ * Handle skip preparation button click
+ */
+function handleSkipPrep(): void {
+    // Clear the preparation countdown interval if it exists
+    if (moduleState.countdownInterval) {
+        clearInterval(moduleState.countdownInterval);
+        moduleState.countdownInterval = null;
+    }
+    
+    // Get the recording time from the record timer
+    const recordTimer = APIUtils.$element('recordTimer');
+    const recordSeconds = parseInt(recordTimer?.textContent || '60', 10);
+    
+    // Show the recording UI immediately
+    showRecordUI(recordSeconds);
+}
+
+/**
  * Handle record button click
  */
 function handleRecordClick(): void {
@@ -1090,7 +1108,12 @@ async function handleLogin(event: Event): Promise<void> {
         const status = APIUtils.$element('status');
         if (status) status.textContent = 'Login successful!';
         
-        // UI state is managed by AuthUtils.updateUIForAuthStatus()
+        // Hide login form and show session interface
+        const loginCard = APIUtils.$element('login-card');
+        const sessionCard = APIUtils.$element('session-card');
+        
+        if (loginCard) loginCard.classList.add('hidden');
+        if (sessionCard) sessionCard.classList.remove('hidden');
         
     } catch (error) {
         const status = APIUtils.$element('status');
@@ -1152,7 +1175,7 @@ async function initializeSpeakingModule(): Promise<void> {
     await AuthUtils.initializeAuth();
     
     // Set up event listeners
-    const loginForm = APIUtils.$element('login-card');
+    const loginForm = APIUtils.$element('loginForm');
     if (loginForm) {
         loginForm.addEventListener('submit', handleLogin);
     }
@@ -1165,6 +1188,11 @@ async function initializeSpeakingModule(): Promise<void> {
     const recordBtn = APIUtils.$element('recordBtn');
     if (recordBtn) {
         recordBtn.addEventListener('click', handleRecordClick);
+    }
+
+    const skipPrepBtn = APIUtils.$element('skipPrepBtn');
+    if (skipPrepBtn) {
+        skipPrepBtn.addEventListener('click', handleSkipPrep);
     }
     
     // Authentication state is managed by AuthUtils.updateUIForAuthStatus()
@@ -1186,6 +1214,7 @@ async function initializeSpeakingModule(): Promise<void> {
     handleLogin,
     handleStartSession,
     handleRecordClick,
+    handleSkipPrep,
     startPrepAndRecord,
     beginRecording,
     stopRecording,

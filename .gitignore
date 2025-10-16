@@ -1,6 +1,6 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
-*.py[codz]
+*.py[cod]
 *$py.class
 
 # C extensions
@@ -25,6 +25,14 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Frontend build directory
+frontend/build/
+
+# Compiled JavaScript files in source directories (should only be in build/)
+frontend/*/*.js
+frontend/shared/js/*.js
+!frontend/build/**/*.js
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

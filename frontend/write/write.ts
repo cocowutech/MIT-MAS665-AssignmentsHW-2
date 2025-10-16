@@ -680,7 +680,12 @@ async function handleLogin(event: Event): Promise<void> {
         const status = APIUtils.$element('status');
         if (status) status.textContent = 'Login successful!';
         
-        // UI state is managed by AuthUtils.updateUIForAuthStatus()
+        // Hide login form and show session interface
+        const loginCard = APIUtils.$element('login-card');
+        const sessionCard = APIUtils.$element('session-card');
+        
+        if (loginCard) loginCard.classList.add('hidden');
+        if (sessionCard) sessionCard.classList.remove('hidden');
         
     } catch (error) {
         const status = APIUtils.$element('status');

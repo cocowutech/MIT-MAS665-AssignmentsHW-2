@@ -14,22 +14,11 @@ if [ -f "$ROOT_DIR/.env" ]; then
     set +a
 fi
 
-# Check if TypeScript files need compilation
-echo "[INFO] Checking TypeScript compilation status..."
-for module in frontend/*/; do
-    module_name=$(basename "$module")
-    ts_file="$module/${module_name}.ts"
-    js_file="$module/${module_name}.js"
-    
-    if [ -f "$ts_file" ]; then
-        if [ ! -f "$js_file" ] || [ "$ts_file" -nt "$js_file" ]; then
-            echo "[INFO] Compiling TypeScript for $module_name module..."
-            cd "$module"
-            npx tsc "${module_name}.ts" --target es2020 --lib es2020,dom --module amd --outDir . --outFile "${module_name}.js"
-            cd "$ROOT_DIR"
-        fi
-    fi
-done
+# Check if build directory exists, if not, run clean_and_rebuild
+if [ ! -d "$ROOT_DIR/frontend/build" ]; then
+    echo "[INFO] Build directory not found. Running clean_and_rebuild..."
+    "$SCRIPT_DIR/clean_and_rebuild.sh"
+fi
 
 export PYTHONPATH="$ROOT_DIR"
 cd "$ROOT_DIR"

@@ -427,6 +427,13 @@ async function login(): Promise<void> {
             console.log('Listening module: Login successful, updating UI');
             AuthUtils.updateUIForAuthStatus();
             AuthUtils.updateAuthHeader();
+            
+            // Hide login form and show session interface
+            const loginCard = document.getElementById('login-card');
+            const sessionCard = document.getElementById('session-card');
+            
+            if (loginCard) loginCard.classList.add('hidden');
+            if (sessionCard) sessionCard.classList.remove('hidden');
         } else {
             loginMsg.textContent = result.error || 'Login failed';
         }
