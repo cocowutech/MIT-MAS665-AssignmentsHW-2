@@ -22,6 +22,16 @@
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
+/* Ensure audio player is visible when not hidden */
+.audio-player:not(.hidden) {
+    display: block !important;
+}
+
+/* Ensure results are visible when not hidden */
+#results:not(.hidden) {
+    display: block !important;
+}
+
 .audio-player-header {
     margin-bottom: 12px;
     font-weight: 600;

@@ -545,11 +545,27 @@ function stopRecording(): void {
     const audioPlayer = APIUtils.$element('audioPlayer');
     const audioPlayback = APIUtils.$element('audioPlayback') as HTMLAudioElement;
     
+    console.log('Audio player elements:', { 
+        audioPlayer: !!audioPlayer, 
+        audioPlayback: !!audioPlayback, 
+        hasBlob: !!moduleState.recordedAudioBlob,
+        audioPlayerClasses: audioPlayer ? audioPlayer.className : 'N/A'
+    });
+    
     if (audioPlayer && audioPlayback && moduleState.recordedAudioBlob) {
         const audioUrl = URL.createObjectURL(moduleState.recordedAudioBlob);
         audioPlayback.src = audioUrl;
         audioPlayer.classList.remove('hidden');
+        // Force display to block in case the hidden class !important is interfering
+        audioPlayer.style.display = 'block';
+        console.log('After removing hidden class and setting display:', audioPlayer.className, audioPlayer.style.display);
         setupAudioPlayer(audioPlayback);
+    } else {
+        console.error('Missing elements for audio player:', { 
+            hasAudioPlayer: !!audioPlayer, 
+            hasAudioPlayback: !!audioPlayback, 
+            hasBlob: !!moduleState.recordedAudioBlob 
+        });
     }
     
     const recordBtn = APIUtils.$element('recordBtn');
@@ -957,7 +973,12 @@ async function submitRecording(): Promise<void> {
  */
 function displayEvaluationResults(evaluation: any): void {
     const resultsDiv = APIUtils.$element('results');
-    if (!resultsDiv) return;
+    if (!resultsDiv) {
+        console.error('Results div not found');
+        return;
+    }
+    
+    console.log('Displaying evaluation results:', evaluation);
     
     // Check if LLM scoring is available
     const hasLLMScore = evaluation.llm_score !== undefined;
@@ -1024,6 +1045,9 @@ function displayEvaluationResults(evaluation: any): void {
     
     // Make sure the results div is visible
     resultsDiv.classList.remove('hidden');
+    // Force display to block in case the hidden class !important is interfering
+    resultsDiv.style.display = 'block';
+    console.log('Results div classes after removing hidden:', resultsDiv.className, resultsDiv.style.display);
 }
 
 /**
