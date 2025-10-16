@@ -432,7 +432,6 @@ function initASR(): any | null {
  * @param recordSeconds - Maximum recording duration
  */
 async function beginRecording(recordSeconds: number): Promise<void> {
-    console.log('beginRecording called');
     hide('prep');
     show('record');
     
@@ -545,6 +544,7 @@ function stopRecording(): void {
     // Enable custom audio player
     const audioPlayer = APIUtils.$element('audioPlayer');
     const audioPlayback = APIUtils.$element('audioPlayback') as HTMLAudioElement;
+    
     if (audioPlayer && audioPlayback && moduleState.recordedAudioBlob) {
         const audioUrl = URL.createObjectURL(moduleState.recordedAudioBlob);
         audioPlayback.src = audioUrl;
@@ -576,20 +576,23 @@ function setupAudioPlayer(audioElement: HTMLAudioElement): void {
     const durationEl = APIUtils.$element('duration');
     const progressBar = document.querySelector('.audio-progress-bar');
 
-    if (!playBtn || !pauseBtn || !restartBtn || !audioProgress || !currentTimeEl || !durationEl || !progressBar) {
+    // Check if we have the essential controls
+    if (!playBtn || !pauseBtn || !restartBtn) {
         return;
     }
 
     // Update duration when metadata loads
     audioElement.addEventListener('loadedmetadata', () => {
-        durationEl.textContent = formatTime(audioElement.duration);
+        if (durationEl) durationEl.textContent = formatTime(audioElement.duration);
     });
 
     // Update progress during playback
     audioElement.addEventListener('timeupdate', () => {
-        const progress = (audioElement.currentTime / audioElement.duration) * 100;
-        audioProgress.style.width = `${progress}%`;
-        currentTimeEl.textContent = formatTime(audioElement.currentTime);
+        if (audioProgress) {
+            const progress = (audioElement.currentTime / audioElement.duration) * 100;
+            audioProgress.style.width = `${progress}%`;
+        }
+        if (currentTimeEl) currentTimeEl.textContent = formatTime(audioElement.currentTime);
     });
 
     // Handle play/pause
@@ -620,13 +623,15 @@ function setupAudioPlayer(audioElement: HTMLAudioElement): void {
     });
 
     // Progress bar click
-    progressBar.addEventListener('click', (e: MouseEvent) => {
-        const rect = progressBar.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const width = rect.width;
-        const percentage = clickX / width;
-        audioElement.currentTime = percentage * audioElement.duration;
-    });
+    if (progressBar) {
+        progressBar.addEventListener('click', (e: MouseEvent) => {
+            const rect = progressBar.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const width = rect.width;
+            const percentage = clickX / width;
+            audioElement.currentTime = percentage * audioElement.duration;
+        });
+    }
 }
 
 /**
@@ -1017,7 +1022,8 @@ function displayEvaluationResults(evaluation: any): void {
         </div>
     `;
     
-    show('results');
+    // Make sure the results div is visible
+    resultsDiv.classList.remove('hidden');
 }
 
 /**
