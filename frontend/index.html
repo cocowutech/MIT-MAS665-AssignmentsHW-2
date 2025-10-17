@@ -18,35 +18,38 @@
 		.small { color: #93c5fd; font-size: 12px; }
 		pre { white-space: pre-wrap; word-break: break-word; background: #0a0f1f; border: 1px solid #1e2a55; padding: 12px; border-radius: 8px; }
 		a { color: #93c5fd; }
+		.hidden { display: none !important; }
 	</style>
 </head>
 <body>
 	<div class="container">
 		<div class="header">
 			<h2>Adaptive Placement Agent</h2>
-			<div class="small"><span id="status">Checking…</span> · <span id="authState">Logged out</span> <button id="logoutBtn" style="display:none;margin-left:8px">Logout</button></div>
+			<div class="small"><span id="status">Checking…</span> · <span id="authState">Logged out</span> <a id="loginLink" href="#login-card" style="margin-left:8px">Login</a></div>
 		</div>
 
-		<div class="card" id="login-card">
+		<div class="card" id="login-card" data-auth-visible="guest">
 			<h3>Login</h3>
-			<div class="row">
-				<div>
-					<label>Username</label>
-					<input id="username" placeholder="username" value="guest" />
+			<form id="loginForm">
+				<div class="row">
+					<div>
+						<label for="username">Username</label>
+						<input id="username" name="username" placeholder="username" value="guest" required />
+					</div>
+					<div>
+						<label for="password">Password</label>
+						<input id="password" name="password" type="password" placeholder="password" value="any" required />
+					</div>
 				</div>
-				<div>
-					<label>Password</label>
-					<input id="password" type="password" placeholder="password" value="any" />
+				<div style="margin-top:12px">
+					<button type="submit">Login</button>
+					<a id="registerLink" href="/register" style="margin-left:8px">Register</a>
+					<span id="loginMsg" class="small" style="margin-left:8px"></span>
 				</div>
-			</div>
-			<div style="margin-top:12px">
-				<button id="loginBtn">Login</button>
-				<a id="registerLink" href="/register" style="margin-left:8px">Register</a>
-				<span id="loginMsg" class="small" style="margin-left:8px"></span>
-			</div>
+			</form>
 		</div>
 
-		<div class="card" id="gen-card" style="display:none">
+		<div class="card hidden" id="gen-card" data-auth-visible="user">
 			<h3>Personalized Chat</h3>
 			
 			<!-- ElevenLabs ConvAI Widget -->
@@ -115,138 +118,151 @@
 		</div>
 	</div>
 
+	<script src="./build/shared/js/auth.js?v=20251022"></script>
+	<script src="./build/shared/js/api.js?v=20251022"></script>
 	<script>
-	const $ = (id) => document.getElementById(id);
-	let token = localStorage.getItem('token');
-	let username = localStorage.getItem('username');
+	(function() {
+		const $ = (id) => document.getElementById(id);
 
-	async function validateToken() {
-		if (!token) return false;
-		try {
-			const r = await fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
-			if (!r.ok) throw new Error('invalid');
-			const u = await r.json().catch(() => null);
-			if (u && u.username) { username = u.username; try { localStorage.setItem('username', username); } catch(_) {} }
-			return true;
-		} catch (_) {
-			handleAuthFailure();
-			return false;
+		function toggleFallback() {
+			const elevenlabsWidget = document.getElementById('elevenlabs-widget');
+			const geminiChat = document.getElementById('gemini-chat');
+			const fallbackBtn = document.getElementById('fallbackBtn');
+
+			if (!elevenlabsWidget || !geminiChat || !fallbackBtn) return;
+
+			const showingFallback = elevenlabsWidget.style.display === 'none';
+			elevenlabsWidget.style.display = showingFallback ? 'block' : 'none';
+			geminiChat.style.display = showingFallback ? 'none' : 'block';
+			fallbackBtn.textContent = showingFallback ? 'Use Gemini Chat Instead' : 'Use ElevenLabs Chat Instead';
 		}
-	}
 
-	function updateAuthUI() {
-		if (token) {
-			$('authState').textContent = username ? `Logged in as ${username}` : 'Logged in';
-			$('logoutBtn').style.display = 'inline-block';
-			$('login-card').style.display = 'none';
-			$('gen-card').style.display = 'block';
-		} else {
-			$('authState').textContent = 'Logged out';
-			$('logoutBtn').style.display = 'none';
-			$('login-card').style.display = 'block';
-			$('gen-card').style.display = 'none';
+		function checkElevenLabsWidget() {
+			setTimeout(() => {
+				const convaiElement = document.querySelector('elevenlabs-convai');
+				const hasShadowRoot = convaiElement && 'shadowRoot' in convaiElement && convaiElement.shadowRoot;
+				if (!hasShadowRoot) {
+					const fallbackBtn = document.getElementById('fallbackBtn');
+					if (fallbackBtn) fallbackBtn.style.display = 'inline-block';
+				}
+			}, 3000);
 		}
-	}
 
-	function handleAuthFailure() {
-		token = null;
-		username = null;
-		try { localStorage.removeItem('token'); localStorage.removeItem('username'); } catch (_) {}
-		updateAuthUI();
-	}
-
-	async function checkHealth() {
-		try {
-			const r = await fetch('/health');
-			if (!r.ok) throw new Error('health failed');
-			const j = await r.json();
-			$('status').textContent = j.ok ? 'API: OK' : 'API: error';
-		} catch (e) {
-			$('status').textContent = 'API: unreachable';
-		}
-	}
-
-	$('loginBtn').addEventListener('click', async () => {
-		$('loginBtn').disabled = true; $('loginMsg').textContent = '…';
-		try {
-			const form = new URLSearchParams();
-			form.set('username', $('username').value);
-			form.set('password', $('password').value);
-			const r = await fetch('/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
-			if (!r.ok) throw new Error('login failed');
-			const j = await r.json();
-			token = j.access_token;
-			username = $('username').value || null;
-			try { localStorage.setItem('token', token); if (username) localStorage.setItem('username', username); } catch (_) {}
-			$('loginMsg').textContent = username ? `Logged in as ${username}` : 'Logged in';
-			updateAuthUI();
-		} catch (e) {
-			$('loginMsg').textContent = 'Login failed';
-		} finally {
-			$('loginBtn').disabled = false;
-		}
-	});
-
-	// Registration moved to /register; no handler here
-
-	$('logoutBtn').addEventListener('click', () => {
-		handleAuthFailure();
-		$('loginMsg').textContent = '';
-	});
-
-	// Function to toggle between ElevenLabs widget and Gemini chat
-	function toggleFallback() {
-		const elevenlabsWidget = document.getElementById('elevenlabs-widget');
-		const geminiChat = document.getElementById('gemini-chat');
-		const fallbackBtn = document.getElementById('fallbackBtn');
-		
-		if (elevenlabsWidget.style.display === 'none') {
-			// Show ElevenLabs widget, hide Gemini chat
-			elevenlabsWidget.style.display = 'block';
-			geminiChat.style.display = 'none';
-			fallbackBtn.textContent = 'Use Gemini Chat Instead';
-		} else {
-			// Show Gemini chat, hide ElevenLabs widget
-			elevenlabsWidget.style.display = 'none';
-			geminiChat.style.display = 'block';
-			fallbackBtn.textContent = 'Use ElevenLabs Chat Instead';
-		}
-	}
-
-	// Check if ElevenLabs widget loads successfully
-	function checkElevenLabsWidget() {
-		setTimeout(() => {
-			const convaiElement = document.querySelector('elevenlabs-convai');
-			if (!convaiElement || !convaiElement.shadowRoot) {
-				// Widget failed to load, show fallback button
-				document.getElementById('fallbackBtn').style.display = 'inline-block';
+		async function checkHealth() {
+			const statusEl = $('status');
+			if (!statusEl) return;
+			try {
+				const response = await fetch('/health');
+				if (!response.ok) throw new Error('health failed');
+				const payload = await response.json();
+				statusEl.textContent = payload.ok ? 'API: OK' : 'API: error';
+			} catch (error) {
+				statusEl.textContent = 'API: unreachable';
 			}
-		}, 3000); // Wait 3 seconds for widget to load
-	}
-
-	$('genBtn').addEventListener('click', async () => {
-		$('genBtn').disabled = true; $('out').textContent = '…';
-		try {
-			const r = await fetch('/gemini/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ prompt: $('prompt').value }) });
-			if (r.status === 401) { handleAuthFailure(); throw new Error('Unauthorized'); }
-			if (!r.ok) throw new Error('request failed');
-			const j = await r.json();
-			$('out').textContent = j && typeof j.text === 'string' ? j.text : '';
-		} catch (e) {
-			$('out').textContent = String(e);
-		} finally {
-			$('genBtn').disabled = false;
 		}
-	});
 
-	(async () => { 
-		await validateToken(); 
-		updateAuthUI(); 
-		checkHealth(); 
-		checkElevenLabsWidget(); 
+		async function handleLogin(event) {
+			event.preventDefault();
+			const form = event.currentTarget;
+			if (!(form instanceof HTMLFormElement)) return;
+			const submitBtn = form.querySelector('button[type="submit"]');
+			const loginMsg = $('loginMsg');
+			const usernameInput = $('username');
+			const passwordInput = $('password');
+
+			if (!(usernameInput instanceof HTMLInputElement) || !(passwordInput instanceof HTMLInputElement)) return;
+
+			if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
+			if (loginMsg) loginMsg.textContent = '…';
+
+			try {
+				const result = await AuthUtils.authenticateUser(usernameInput.value, passwordInput.value);
+				if (!result.success && loginMsg) {
+					loginMsg.textContent = result.error || 'Login failed';
+				}
+			} catch (error) {
+				if (loginMsg) loginMsg.textContent = 'Login failed';
+			} finally {
+				if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false;
+			}
+		}
+
+		async function handleGenerate(event) {
+			event.preventDefault();
+			const genBtn = event.currentTarget;
+			if (!(genBtn instanceof HTMLButtonElement)) return;
+			const promptInput = $('prompt');
+			const output = $('out');
+			if (!(promptInput instanceof HTMLTextAreaElement) || !output) return;
+
+			genBtn.disabled = true;
+			output.textContent = '…';
+
+			try {
+				const { token } = AuthUtils.getAuthState();
+				const headers = { 'Content-Type': 'application/json' };
+				if (token) headers['Authorization'] = `Bearer ${token}`;
+
+				const response = await fetch('/gemini/generate', {
+					method: 'POST',
+					headers,
+					body: JSON.stringify({ prompt: promptInput.value })
+				});
+
+				if (response.status === 401) {
+					AuthUtils.clearAuth();
+					throw new Error('Unauthorized');
+				}
+
+				if (!response.ok) {
+					throw new Error('Request failed');
+				}
+
+				const payload = await response.json();
+				output.textContent = payload && typeof payload.text === 'string' ? payload.text : '';
+			} catch (error) {
+				output.textContent = String(error);
+			} finally {
+				genBtn.disabled = false;
+			}
+		}
+
+		function initializeAuthUI() {
+			const loginForm = $('loginForm');
+			if (loginForm) {
+				loginForm.addEventListener('submit', handleLogin);
+			}
+
+			const genBtn = $('genBtn');
+			if (genBtn) {
+				genBtn.addEventListener('click', handleGenerate);
+			}
+
+			AuthUtils.onAuthChange((state) => {
+				const loginMsg = $('loginMsg');
+				if (loginMsg) {
+					loginMsg.textContent = state.isAuthenticated
+						? (state.username ? `Logged in as ${state.username}` : 'Logged in')
+						: '';
+				}
+			});
+
+			window.toggleFallback = toggleFallback;
+		}
+
+		async function initialize() {
+			initializeAuthUI();
+			await AuthUtils.initializeAuth();
+			checkHealth();
+			checkElevenLabsWidget();
+		}
+
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', initialize);
+		} else {
+			initialize();
+		}
 	})();
 	</script>
 </body>
 </html>
-
-

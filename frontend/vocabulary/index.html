@@ -39,15 +39,15 @@
     -->
     
     <!-- Shared CSS -->
-    <link rel="stylesheet" href="../build/shared/css/base.css">
-    <link rel="stylesheet" href="../build/shared/css/components.css">
+    <link rel="stylesheet" href="/app/build/shared/css/base.css">
+    <link rel="stylesheet" href="/app/build/shared/css/components.css">
     <!-- Module-specific CSS -->
-    <link rel="stylesheet" href="../build/vocabulary/styles.css?v=20251013">
+    <link rel="stylesheet" href="/app/build/vocabulary/styles.css?v=20251022">
     <!-- Shared JavaScript -->
-    <script src="../build/shared/js/auth.js?v=20251019"></script>
-    <script src="../build/shared/js/api.js?v=20251019"></script>
+    <script src="/app/build/shared/js/auth.js?v=20251022"></script>
+    <script src="/app/build/shared/js/api.js?v=20251022"></script>
     <!-- Module-specific JavaScript -->
-    <script src="../build/vocabulary/vocabulary.js?v=20251019"></script>
+    <script src="/app/build/vocabulary/vocabulary.js?v=20251022"></script>
     <link rel="icon" href="data:," />
     <base href="/app/" />
 </head>
@@ -71,7 +71,7 @@
         <div id="status" class="small"></div>
 
         <!-- Login Form -->
-        <div id="login-card" class="card">
+        <div id="login-card" class="card" data-auth-visible="guest">
             <h2>Login</h2>
             <form id="loginForm">
                 <div class="row">
@@ -86,12 +86,13 @@
                 </div>
                 <div style="margin-top:12px">
                     <button type="submit">Login</button>
+                    <span id="loginMsg" class="small" style="margin-left:8px"></span>
                 </div>
             </form>
         </div>
 
         <!-- Main Interface -->
-        <div id="session-card" class="hidden">
+        <div id="session-card" class="hidden" data-auth-visible="user">
             <div class="card">
                 <h2>Vocabulary Assessment</h2>
                 <p>This assessment will evaluate your vocabulary knowledge through multiple choice questions.</p>

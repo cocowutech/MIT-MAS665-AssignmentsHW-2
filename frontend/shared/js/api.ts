@@ -14,7 +14,7 @@ const APIUtils = {
     /**
      * Update authentication token for API requests
      */
-    updateAuthHeader: function(token: string): void {
+    updateAuthHeader: function(token: string | null): void {
         this.authToken = token;
     },
 
@@ -82,23 +82,22 @@ const APIUtils = {
      */
     ListeningAPI: {
         startSession: async function(level: string): Promise<any> {
-            return APIUtils.makeRequest("/listening/start", {
+            return APIUtils.makeRequest("/listen/session/start", {
                 method: "POST",
                 body: JSON.stringify({ level })
             });
         },
 
         submitAnswer: async function(answer: any): Promise<any> {
-            return APIUtils.makeRequest("/listening/answer", {
+            return APIUtils.makeRequest("/listen/session/submit", {
                 method: "POST",
                 body: JSON.stringify(answer)
             });
         },
 
         getNextTask: async function(sessionId: string): Promise<any> {
-            return APIUtils.makeRequest("/listening/next", {
-                method: "POST",
-                body: JSON.stringify({ session_id: sessionId })
+            return APIUtils.makeRequest("/listen/session/state", {
+                method: "GET"
             });
         }
     },
@@ -160,23 +159,23 @@ const APIUtils = {
      */
     WritingAPI: {
         startSession: async function(level: string): Promise<any> {
-            return APIUtils.makeRequest("/writing/start", {
+            return APIUtils.makeRequest("/write/prompt", {
                 method: "POST",
                 body: JSON.stringify({ level })
             });
         },
 
         submitAnswer: async function(answer: any): Promise<any> {
-            return APIUtils.makeRequest("/writing/answer", {
+            return APIUtils.makeRequest("/write/score/text", {
                 method: "POST",
                 body: JSON.stringify(answer)
             });
         },
 
         getNextTask: async function(sessionId: string): Promise<any> {
-            return APIUtils.makeRequest("/writing/next", {
+            return APIUtils.makeRequest("/write/prompt", {
                 method: "POST",
-                body: JSON.stringify({ session_id: sessionId })
+                body: JSON.stringify({ level: "A2" })
             });
         }
     }

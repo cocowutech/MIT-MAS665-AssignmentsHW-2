@@ -80,8 +80,8 @@ GEMINI_VERTEX_REGION=us-central1
 GEMINI_VERTEX_PROJECT=your-gcp-project-id
 
 # Auth (seed user and JWT)
-SEED_USERNAME=rong_wu
-SEED_PASSWORD=mit!23456
+SEED_USERNAME=guest
+SEED_PASSWORD=guest
 JWT_SECRET_KEY=change-this-in-prod
 ```
 

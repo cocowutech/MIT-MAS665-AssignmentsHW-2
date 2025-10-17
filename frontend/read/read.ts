@@ -116,9 +116,9 @@ declare const APIUtils: any;
  */
 class ReadingModuleState {
     // Authentication state
-    public token: string | null = localStorage.getItem('token');
-    public username: string | null = localStorage.getItem('username');
-    
+    public token: string | null = null;
+    public username: string | null = null;
+
     // Session state
     public session: ReadingSession | null = null;
     public currentPassage: ReadingPassage | null = null;
@@ -133,42 +133,29 @@ class ReadingModuleState {
     public isSessionActive: boolean = false;
     public lastEvaluation: any = null;
     public finalLevel: string | null = null;
-    
+
     constructor() {
-        this.initializeAuth();
-    }
-    
-    /**
-     * Initialize authentication state
-     */
-    private initializeAuth(): void {
-        if (this.token && this.username) {
-            AuthUtils.updateAuthHeader();
-            AuthUtils.updateUIForAuthStatus();
+        if (typeof AuthUtils !== 'undefined' && typeof AuthUtils.getAuthState === 'function') {
+            this.applyAuthState(AuthUtils.getAuthState());
+        }
+
+        if (typeof AuthUtils !== 'undefined' && typeof AuthUtils.onAuthChange === 'function') {
+            AuthUtils.onAuthChange((state: { token: string | null; username: string | null; isAuthenticated: boolean }) => {
+                this.applyAuthState(state);
+            });
         }
     }
-    
+
     /**
-     * Update authentication state
+     * Sync local module state with global auth status
      */
-    public updateAuth(token: string, username: string): void {
-        this.token = token;
-        this.username = username;
-        localStorage.setItem('token', token);
-        localStorage.setItem('username', username);
-        AuthUtils.updateAuthHeader();
-        AuthUtils.updateUIForAuthStatus();
-    }
-    
-    /**
-     * Clear authentication state
-     */
-    public clearAuth(): void {
-        this.token = null;
-        this.username = null;
-        localStorage.removeItem('token');
-        localStorage.removeItem('username');
-        AuthUtils.updateUIForAuthStatus();
+    private applyAuthState(state: { token: string | null; username: string | null; isAuthenticated: boolean }): void {
+        this.token = state.token;
+        this.username = state.username;
+
+        if (!state.isAuthenticated) {
+            this.resetSessionState();
+        }
     }
     
     /**
@@ -768,35 +755,34 @@ async function handleAssessAgain(): Promise<void> {
  */
 async function handleLogin(event: Event): Promise<void> {
     event.preventDefault();
-    
-    const usernameInput = APIUtils.$element('username') as HTMLInputElement;
-    const passwordInput = APIUtils.$element('password') as HTMLInputElement;
-    
+    const form = event.currentTarget as HTMLFormElement;
+    const usernameInput = APIUtils.$element('username') as HTMLInputElement | null;
+    const passwordInput = APIUtils.$element('password') as HTMLInputElement | null;
+    const loginMsg = APIUtils.$element('loginMsg');
+    const status = APIUtils.$element('status');
+    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+
     if (!usernameInput || !passwordInput) return;
-    
+
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
-    
+
     if (!username || !password) {
-        alert('Please enter both username and password');
+        if (status) status.textContent = 'Please enter both username and password.';
         return;
     }
-    
+
+    if (submitBtn) submitBtn.disabled = true;
+    if (loginMsg) loginMsg.textContent = '…';
+
     try {
         await login(username, password);
-        const status = APIUtils.$element('status');
         if (status) status.textContent = 'Login successful!';
-        
-        // Hide login form and show session interface
-        const loginCard = APIUtils.$element('login-card');
-        const sessionCard = APIUtils.$element('session-card');
-        
-        if (loginCard) loginCard.classList.add('hidden');
-        if (sessionCard) sessionCard.classList.remove('hidden');
-        
     } catch (error) {
-        const status = APIUtils.$element('status');
         if (status) status.textContent = 'Login failed. Please try again.';
+        if (loginMsg) loginMsg.textContent = 'Login failed';
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
     }
 }
 

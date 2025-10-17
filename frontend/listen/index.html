@@ -35,9 +35,10 @@
     -->
     
     <!-- Shared CSS Styles -->
-    <link rel="stylesheet" href="../build/shared/css/base.css">
-    <link rel="stylesheet" href="../build/shared/css/components.css">
-    <link rel="stylesheet" href="../build/listen/styles.css">
+    <link rel="stylesheet" href="/app/build/shared/css/base.css">
+    <link rel="stylesheet" href="/app/build/shared/css/components.css">
+    <link rel="stylesheet" href="/app/build/listen/styles.css">
+    <base href="/app/" />
 </head>
 <body>
     <!-- Main application container -->
@@ -59,7 +60,7 @@
 
 
         <!-- Login form card -->
-        <div class="card" id="login-card">
+        <div class="card" id="login-card" data-auth-visible="guest">
             <h3>Login</h3>
             <form id="loginForm">
             <div class="row">
@@ -80,7 +81,7 @@
         </div>
 
         <!-- Session start card -->
-        <div class="card hidden" id="session-card">
+        <div class="card hidden" id="session-card" data-auth-visible="user">
             <h3>Start</h3>
             <div class="small" style="margin-bottom: 12px;">
                 Starting at CEFR A2 (KET). Difficulty adapts based on your answers.
@@ -117,8 +118,8 @@
     </div>
 
     <!-- Load shared utilities -->
-    <script src="../build/shared/js/auth.js?v=20251022"></script>
-    <script src="../build/shared/js/api.js?v=20251022"></script>
-    <script src="../build/listen/listen.js?v=20251022"></script>
+    <script src="/app/build/shared/js/auth.js?v=20251022"></script>
+    <script src="/app/build/shared/js/api.js?v=20251022"></script>
+    <script src="/app/build/listen/listen.js?v=20251022"></script>
 </body>
 </html>

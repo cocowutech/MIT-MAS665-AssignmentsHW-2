@@ -422,19 +422,7 @@ async function login(): Promise<void> {
         const result = await AuthUtils.authenticateUser(usernameInput.value, passwordInput.value);
         console.log('Listening module: Login result:', result);
         
-        if (result.success) {
-            loginMsg.textContent = 'Logged in';
-            console.log('Listening module: Login successful, updating UI');
-            AuthUtils.updateUIForAuthStatus();
-            AuthUtils.updateAuthHeader();
-            
-            // Hide login form and show session interface
-            const loginCard = document.getElementById('login-card');
-            const sessionCard = document.getElementById('session-card');
-            
-            if (loginCard) loginCard.classList.add('hidden');
-            if (sessionCard) sessionCard.classList.remove('hidden');
-        } else {
+        if (!result.success) {
             loginMsg.textContent = result.error || 'Login failed';
         }
     } catch (error) {
@@ -703,7 +691,7 @@ async function startSession(): Promise<void> {
     
     try {
         // Set auth token for API client
-        APIUtils.apiClient.setAuthToken(AuthUtils.authState.token);
+        APIUtils.updateAuthHeader(AuthUtils.authState.token);
         
         const data = await APIUtils.ListeningAPI.startSession();
         
@@ -757,7 +745,7 @@ async function submitAnswers(): Promise<void> {
         }));
         
         // Set auth token for API client
-        APIUtils.apiClient.setAuthToken(AuthUtils.authState.token);
+        APIUtils.updateAuthHeader(AuthUtils.authState.token);
         
         const data: SessionSubmitResponse = await APIUtils.ListeningAPI.submitAnswers(moduleState.sessionId!, answers);
         reflectEvaluation(data.evaluated);
