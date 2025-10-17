@@ -1,6 +1,6 @@
 from __future__ import annotations
 import httpx
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from .settings import settings
 
 class GeminiClient:
@@ -38,29 +38,59 @@ class GeminiClient:
 			self._fallback_client = httpx.AsyncClient(timeout=30)
 
 	async def generate(self, prompt: str, *, thinking_budget: Optional[int] = None) -> str:
+		payload: Dict[str, Any] = {"contents": [{"parts": [{"text": prompt}]}]}
+		return await self._post_payload(
+			payload,
+			thinking_budget=thinking_budget,
+			fallback_prompt=prompt,
+		)
+
+	async def generate_multimodal(
+		self,
+		parts: List[Dict[str, Any]],
+		*,
+		role: str = "user",
+		thinking_budget: Optional[int] = None,
+		allow_fallback: bool = False,
+	) -> str:
+		payload: Dict[str, Any] = {"contents": [{"role": role, "parts": parts}]}
+		return await self._post_payload(
+			payload,
+			thinking_budget=thinking_budget,
+			fallback_prompt=None,
+			allow_fallback=allow_fallback,
+		)
+
+	async def _post_payload(
+		self,
+		payload: Dict[str, Any],
+		*,
+		thinking_budget: Optional[int] = None,
+		fallback_prompt: Optional[str],
+		allow_fallback: bool = True,
+	) -> str:
 		params: Dict[str, Any] = {}
 		headers: Dict[str, str] = {}
 		if self._auth_in_query:
 			params["key"] = self.api_key
 		else:
 			headers["x-goog-api-key"] = self.api_key
-		payload: Dict[str, Any] = {"contents": [{"parts": [{"text": prompt}]}]}
-		# Optional thinking budget to control Gemini internal reasoning latency
 		if thinking_budget is not None:
 			try:
 				budget_tokens = int(thinking_budget)
 			except Exception:
 				budget_tokens = 0
-			payload["thinkingConfig"] = {"budgetTokens": budget_tokens}
+			payload = {**payload, "thinkingConfig": {"budgetTokens": budget_tokens}}
 		last_error: Optional[Exception] = None
 		try:
 			r = await self._client.post(self.base_url, params=params, headers=headers, json=payload)
 			r.raise_for_status()
 		except httpx.HTTPStatusError as http_err:
 			if thinking_budget is not None and "thinkingConfig" in payload:
-				payload_no_thinking = {"contents": [{"parts": [{"text": prompt}]}]}
+				fallback_payload = dict(payload)
+				fallback_payload.pop("thinkingConfig", None)
 				try:
-					r = await self._client.post(self.base_url, params=params, headers=headers, json=payload_no_thinking)
+					r = await self._client.post(self.base_url, params=params, headers=headers, json=fallback_payload)
 					r.raise_for_status()
 				except Exception as err:
 					last_error = err
@@ -72,11 +102,13 @@ class GeminiClient:
 			try:
 				data = r.json()
 				return data["candidates"][0]["content"]["parts"][0]["text"]
-			except Exception as json_err:
+			except Exception:
 				last_error = RuntimeError(f"Unexpected Gemini response: {r.text}")
-		if not self._fallback_enabled:
+		if not allow_fallback or not self._fallback_enabled:
 			raise last_error or RuntimeError("Gemini call failed and no fallback configured")
-		return await self._fallback_generate(prompt, last_error)
+		if fallback_prompt is None:
+			raise last_error or RuntimeError("Gemini call failed and fallback prompt unavailable")
+		return await self._fallback_generate(fallback_prompt, last_error)
 
 	async def aclose(self) -> None:
 		await self._client.aclose()

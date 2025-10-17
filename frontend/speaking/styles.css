@@ -362,6 +362,32 @@
     margin-top: 16px;
 }
 
+.accent-analysis {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 16px 0;
+}
+
+.accent-chip {
+    background: #0a0f1f;
+    border: 1px solid #1e2a55;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: #60a5fa;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.accent-chip span {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #9ca3af;
+}
+
 .evaluation-header {
     display: flex;
     align-items: center;

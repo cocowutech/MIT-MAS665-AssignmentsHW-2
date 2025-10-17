@@ -151,6 +151,11 @@ class AnswerResponse(BaseModel):
 	item: Optional[SpeakingItem] = None
 	pronunciation_score: Optional[float] = None
 	pronunciation_feedback: Optional[str] = None
+	overall_score: Optional[float] = None
+	audio_feedback: Optional[str] = None
+	audio_scores: Optional[Dict[str, float]] = None
+	accent_label: Optional[str] = None
+	accent_confidence: Optional[float] = None
 
 
 # ============================================================================
@@ -461,7 +466,12 @@ def _adjust_level(state: _SessionState, was_correct: bool) -> None:
 			state.incorrect_streak = 0
 
 
-async def _evaluate_transcript(level: str, prompt_text: str, transcript: str) -> Dict[str, Any]:
+async def _evaluate_transcript(
+	level: str,
+	prompt_text: str,
+	transcript: str,
+	audio_base64: Optional[str] = None,
+) -> Dict[str, Any]:
 	"""Use LLM to assess student's CEFR level and performance relative to target.
 	
 	Evaluates the student's speaking performance using the LLM as an expert ESL examiner.
@@ -482,12 +492,41 @@ async def _evaluate_transcript(level: str, prompt_text: str, transcript: str) ->
 	model = settings.gemini_model_listen or client_model
 	client = GeminiClient(model=model)
 	try:
-		instructions = f"""
+		if audio_base64:
+			analysis_instructions = f"""
+You are an expert ESL speaking examiner. Evaluate the student's performance using BOTH the transcript and the provided audio sample. Estimate the student's CEFR level (A1–C2) and compare it against the target level {level}. Consider content, grammar, vocabulary, fluency, pronunciation, and accent characteristics.
+
+Identify the most likely accent family you detect (for example: General American, British RP, Indian English, Australian, African, East Asian, Latin American, Mixed, Unclear). If unsure, respond with "Unclear". Provide a confidence value between 0 and 1.
+
+Return STRICT JSON only with this structure:
+{{
+  "estimated_level": "A1|A2|B1|B2|C1|C2",
+  "grade": "better|equal|worse",
+  "overall_score": number (0-100),
+  "text_feedback": "one or two sentences with concrete advice",
+  "audio_feedback": "one sentence commenting on accent/clarity",
+  "audio_analysis": {{
+    "accent_label": string,
+    "accent_confidence": number (0-1),
+    "clarity_score": number (0-100),
+    "fluency_score": number (0-100),
+    "overall_audio_score": number (0-100)
+  }}
+}}
+""".strip()
+			parts = [
+				{"text": analysis_instructions},
+				{"text": f"Task prompt:\n{prompt_text}\n\nStudent transcript (verbatim):\n{transcript}"},
+				{"inline_data": {"mime_type": "audio/webm", "data": audio_base64}},
+			]
+			raw = await client.generate_multimodal(parts)
+		else:
+			instructions = f"""
 You are an expert ESL examiner. Assess the student's CEFR speaking level (A1–C2).
 
 Context: The expected answer was based on a task appropriate for CEFR {level}. Use that as a reference point when comparing performance, but your primary job is to estimate the student's level.
 
-Consider task achievement, range and control of grammar and vocabulary, coherence and fluency. Ignore accent.
+Consider task achievement, range and control of grammar and vocabulary, coherence and fluency.
 
 Task prompt:
 {prompt_text}
@@ -502,7 +541,7 @@ Return STRICT JSON only:
   "feedback": "one or two sentences with concrete advice"
 }}
 """.strip()
-		raw = await client.generate(instructions)
+			raw = await client.generate(instructions)
 	finally:
 		await client.aclose()
 
@@ -523,8 +562,46 @@ Return STRICT JSON only:
 				grade = "equal"
 		else:
 			grade = "equal"
-	feedback = (data.get("feedback") or "").strip() or None
-	return {"grade": grade, "feedback": feedback, "predicted_level": predicted}
+	feedback = (data.get("feedback") or data.get("text_feedback") or "").strip() or None
+	audio_feedback = (data.get("audio_feedback") or "").strip() or None
+	audio_analysis = data.get("audio_analysis") or {}
+
+	def _safe_float(value: Any) -> Optional[float]:
+		try:
+			if value is None:
+				return None
+			return float(value)
+		except (TypeError, ValueError):
+			return None
+
+	clarity_score = _safe_float(audio_analysis.get("clarity_score"))
+	fluency_score = _safe_float(audio_analysis.get("fluency_score"))
+	overall_audio_score = _safe_float(audio_analysis.get("overall_audio_score"))
+	overall_score = _safe_float(data.get("overall_score"))
+	accent_confidence = _safe_float(audio_analysis.get("accent_confidence"))
+	accent_label = audio_analysis.get("accent_label")
+	if isinstance(accent_label, str):
+		accent_label = accent_label.strip() or None
+
+	audio_scores_dict = {
+		"clarity_score": clarity_score,
+		"fluency_score": fluency_score,
+		"overall_audio_score": overall_audio_score,
+	}
+	audio_scores = {k: v for k, v in audio_scores_dict.items() if v is not None}
+	if not audio_scores:
+		audio_scores = None
+
+	return {
+		"grade": grade,
+		"feedback": feedback,
+		"predicted_level": predicted,
+		"overall_score": overall_score,
+		"audio_feedback": audio_feedback or None,
+		"audio_scores": audio_scores,
+		"accent_label": accent_label,
+		"accent_confidence": accent_confidence,
+	}
 
 def _adjust_level_direct(state: _SessionState, grade: str) -> None:
 	"""Adjust difficulty level based on LLM assessment grade.
@@ -693,13 +770,28 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 	pronunciation_score: Optional[float] = None
 	pronunciation_feedback: Optional[str] = None
 	audio_base64 = req.audio_base64 or ""
+	overall_score: Optional[float] = None
+	audio_feedback: Optional[str] = None
+	audio_scores: Optional[Dict[str, float]] = None
+	accent_label: Optional[str] = None
+	accent_confidence: Optional[float] = None
 
 	if transcript:
 		try:
-			eval_result = await _evaluate_transcript(item.cefr, item.prompt, clean_transcript)
+			eval_result = await _evaluate_transcript(
+				item.cefr,
+				item.prompt,
+				clean_transcript,
+				audio_base64=audio_base64 or None,
+			)
 			grade = eval_result["grade"]
 			feedback = eval_result.get("feedback")
 			predicted_level = eval_result.get("predicted_level")
+			overall_score = eval_result.get("overall_score")
+			audio_feedback = eval_result.get("audio_feedback")
+			audio_scores = eval_result.get("audio_scores")
+			accent_label = eval_result.get("accent_label")
+			accent_confidence = eval_result.get("accent_confidence")
 			# If model did not provide a valid predicted level, apply heuristic fallback
 			if not predicted_level:
 				fallback = _heuristic_estimate_level(clean_transcript)
@@ -746,6 +838,11 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 			"feedback": feedback,
 			"pronunciation_score": pronunciation_score,
 			"pronunciation_feedback": pronunciation_feedback,
+			"overall_score": overall_score,
+			"audio_feedback": audio_feedback,
+			"audio_scores": audio_scores,
+			"accent_label": accent_label,
+			"accent_confidence": accent_confidence,
 		}
 	)
 
@@ -764,6 +861,11 @@ async def answer(req: AnswerRequest, user: User = Depends(get_current_user)):
 		item=item if not finished else None,
 		pronunciation_score=pronunciation_score,
 		pronunciation_feedback=pronunciation_feedback,
+		overall_score=overall_score,
+		audio_feedback=audio_feedback,
+		audio_scores=audio_scores,
+		accent_label=accent_label,
+		accent_confidence=accent_confidence,
 	)
 
 	if finished:

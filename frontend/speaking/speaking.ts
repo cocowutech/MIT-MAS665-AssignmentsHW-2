@@ -66,7 +66,7 @@ interface SpeakingAnswer {
     session_id: string;
     item_id: string;
     transcript: string;
-    audio_data?: string;  // Base64 encoded audio
+    audio_base64?: string;  // Base64 encoded audio
     was_correct?: boolean;
 }
 
@@ -103,6 +103,8 @@ class SpeakingModuleState {
     public mediaRecorder: MediaRecorder | null = null;
     public recordedChunks: Blob[] = [];
     public recordedAudioBlob: Blob | null = null;
+    public recordedAudioUrl: string | null = null;
+    public audioControlsInitialized: boolean = false;
     
     // Session and UI state
     public countdownInterval: number | null = null;
@@ -158,6 +160,10 @@ class SpeakingModuleState {
         this.asrFinalText = '';
         this.recordedChunks = [];
         this.recordedAudioBlob = null;
+        if (this.recordedAudioUrl) {
+            URL.revokeObjectURL(this.recordedAudioUrl);
+            this.recordedAudioUrl = null;
+        }
         
         if (this.countdownInterval) {
             clearInterval(this.countdownInterval);
@@ -414,6 +420,57 @@ function initASR(): any | null {
 // ============================================================================
 
 /**
+ * Release any existing recorded audio URL to prevent memory leaks
+ */
+function revokeRecordedAudioUrl(): void {
+    if (moduleState.recordedAudioUrl) {
+        URL.revokeObjectURL(moduleState.recordedAudioUrl);
+        moduleState.recordedAudioUrl = null;
+    }
+}
+
+/**
+ * Update the custom audio player with the latest recording
+ */
+function refreshAudioPlayer(): void {
+    const audioPlayer = APIUtils.$element('audioPlayer');
+    const audioPlayback = APIUtils.$element('audioPlayback') as HTMLAudioElement | null;
+
+    if (!audioPlayer || !audioPlayback || !moduleState.recordedAudioBlob) {
+        return;
+    }
+
+    revokeRecordedAudioUrl();
+    moduleState.recordedAudioUrl = URL.createObjectURL(moduleState.recordedAudioBlob);
+    audioPlayback.src = moduleState.recordedAudioUrl;
+    audioPlayback.load();
+
+    const audioProgress = APIUtils.$element('audioProgress');
+    if (audioProgress) {
+        audioProgress.style.width = '0%';
+    }
+
+    const currentTimeEl = APIUtils.$element('currentTime');
+    if (currentTimeEl) {
+        currentTimeEl.textContent = formatTime(0);
+    }
+
+    const durationEl = APIUtils.$element('duration');
+    if (durationEl) {
+        durationEl.textContent = formatTime(0);
+    }
+
+    const playBtn = APIUtils.$element('playBtn');
+    const pauseBtn = APIUtils.$element('pauseBtn');
+    if (playBtn) playBtn.classList.remove('hidden');
+    if (pauseBtn) pauseBtn.classList.add('hidden');
+
+    audioPlayer.classList.remove('hidden');
+    audioPlayer.style.display = 'block';
+    setupAudioPlayer(audioPlayback);
+}
+
+/**
  * Start audio recording with MediaRecorder API
  * Captures audio data and provides real-time speech recognition
  * @param recordSeconds - Maximum recording duration
@@ -432,6 +489,7 @@ async function beginRecording(recordSeconds: number): Promise<void> {
     const audioPlayer = APIUtils.$element('audioPlayer');
     if (audioPlayer) {
         audioPlayer.classList.add('hidden');
+        (audioPlayer as HTMLElement).style.display = '';
     }
     
     const recordBtn = APIUtils.$element('recordBtn');
@@ -445,6 +503,7 @@ async function beginRecording(recordSeconds: number): Promise<void> {
     moduleState.transcriptText = '';
     moduleState.asrFinalText = '';
     moduleState.recordedChunks = [];
+    revokeRecordedAudioUrl();
     
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -459,12 +518,7 @@ async function beginRecording(recordSeconds: number): Promise<void> {
         moduleState.mediaRecorder.onstop = () => {
             const blob = new Blob(moduleState.recordedChunks, { type: 'audio/webm' });
             moduleState.recordedAudioBlob = blob;
-            
-            const audioPlayback = APIUtils.$element('audioPlayback') as HTMLAudioElement;
-            if (audioPlayback) {
-                audioPlayback.src = URL.createObjectURL(blob);
-            }
-            
+            refreshAudioPlayer();
             stream.getTracks().forEach(track => track.stop());
         };
         
@@ -528,32 +582,8 @@ function stopRecording(): void {
         recordingStatus.innerHTML = '<div class="recording-dot" style="background-color: #10b981;"></div><span>Recording Complete</span>';
     }
     
-    // Enable custom audio player
-    const audioPlayer = APIUtils.$element('audioPlayer');
-    const audioPlayback = APIUtils.$element('audioPlayback') as HTMLAudioElement;
-    
-    console.log('Audio player elements:', { 
-        audioPlayer: !!audioPlayer, 
-        audioPlayback: !!audioPlayback, 
-        hasBlob: !!moduleState.recordedAudioBlob,
-        audioPlayerClasses: audioPlayer ? audioPlayer.className : 'N/A'
-    });
-    
-    if (audioPlayer && audioPlayback && moduleState.recordedAudioBlob) {
-        const audioUrl = URL.createObjectURL(moduleState.recordedAudioBlob);
-        audioPlayback.src = audioUrl;
-        audioPlayer.classList.remove('hidden');
-        // Force display to block in case the hidden class !important is interfering
-        audioPlayer.style.display = 'block';
-        console.log('After removing hidden class and setting display:', audioPlayer.className, audioPlayer.style.display);
-        setupAudioPlayer(audioPlayback);
-    } else {
-        console.error('Missing elements for audio player:', { 
-            hasAudioPlayer: !!audioPlayer, 
-            hasAudioPlayback: !!audioPlayback, 
-            hasBlob: !!moduleState.recordedAudioBlob 
-        });
-    }
+    // Attach the most recent recording to the custom audio player
+    refreshAudioPlayer();
     
     const recordBtn = APIUtils.$element('recordBtn');
     if (recordBtn) {
@@ -584,56 +614,60 @@ function setupAudioPlayer(audioElement: HTMLAudioElement): void {
         return;
     }
 
-    // Update duration when metadata loads
-    audioElement.addEventListener('loadedmetadata', () => {
-        if (durationEl) durationEl.textContent = formatTime(audioElement.duration);
-    });
-
-    // Update progress during playback
-    audioElement.addEventListener('timeupdate', () => {
-        if (audioProgress) {
-            const progress = (audioElement.currentTime / audioElement.duration) * 100;
-            audioProgress.style.width = `${progress}%`;
-        }
-        if (currentTimeEl) currentTimeEl.textContent = formatTime(audioElement.currentTime);
-    });
-
-    // Handle play/pause
-    audioElement.addEventListener('play', () => {
-        playBtn.classList.add('hidden');
-        pauseBtn.classList.remove('hidden');
-    });
-
-    audioElement.addEventListener('pause', () => {
-        playBtn.classList.remove('hidden');
-        pauseBtn.classList.add('hidden');
-    });
-
-    // Play button
-    playBtn.addEventListener('click', () => {
-        audioElement.play();
-    });
-
-    // Pause button
-    pauseBtn.addEventListener('click', () => {
-        audioElement.pause();
-    });
-
-    // Restart button
-    restartBtn.addEventListener('click', () => {
-        audioElement.currentTime = 0;
-        audioElement.play();
-    });
-
-    // Progress bar click
-    if (progressBar) {
-        progressBar.addEventListener('click', (e: MouseEvent) => {
-            const rect = progressBar.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const width = rect.width;
-            const percentage = clickX / width;
-            audioElement.currentTime = percentage * audioElement.duration;
+    if (!moduleState.audioControlsInitialized) {
+        // Update duration when metadata loads
+        audioElement.addEventListener('loadedmetadata', () => {
+            if (durationEl) durationEl.textContent = formatTime(audioElement.duration);
         });
+
+        // Update progress during playback
+        audioElement.addEventListener('timeupdate', () => {
+            if (audioProgress && audioElement.duration) {
+                const progress = (audioElement.currentTime / audioElement.duration) * 100;
+                audioProgress.style.width = `${progress}%`;
+            }
+            if (currentTimeEl) currentTimeEl.textContent = formatTime(audioElement.currentTime);
+        });
+
+        // Handle play/pause
+        audioElement.addEventListener('play', () => {
+            playBtn.classList.add('hidden');
+            pauseBtn.classList.remove('hidden');
+        });
+
+        audioElement.addEventListener('pause', () => {
+            playBtn.classList.remove('hidden');
+            pauseBtn.classList.add('hidden');
+        });
+
+        // Play button
+        playBtn.addEventListener('click', () => {
+            audioElement.play();
+        });
+
+        // Pause button
+        pauseBtn.addEventListener('click', () => {
+            audioElement.pause();
+        });
+
+        // Restart button
+        restartBtn.addEventListener('click', () => {
+            audioElement.currentTime = 0;
+            audioElement.play();
+        });
+
+        // Progress bar click
+        if (progressBar) {
+            progressBar.addEventListener('click', (e: MouseEvent) => {
+                const rect = progressBar.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const width = rect.width;
+                const percentage = clickX / width;
+                audioElement.currentTime = percentage * audioElement.duration;
+            });
+        }
+
+        moduleState.audioControlsInitialized = true;
     }
 }
 
@@ -806,9 +840,16 @@ async function startPrepAndRecord(prepSeconds: number, recordSeconds: number): P
     moduleState.hasRecordedThisItem = false;
     moduleState.transcriptText = '';
     moduleState.submitTriggered = false;
+    moduleState.recordedAudioBlob = null;
+    revokeRecordedAudioUrl();
     
     const audioPlayback = APIUtils.$element('audioPlayback') as HTMLAudioElement;
     if (audioPlayback) audioPlayback.src = '';
+    const audioPlayer = APIUtils.$element('audioPlayer');
+    if (audioPlayer) {
+        audioPlayer.classList.add('hidden');
+        (audioPlayer as HTMLElement).style.display = '';
+    }
     
     const recordBtn = APIUtils.$element('recordBtn');
     if (recordBtn) {
@@ -900,29 +941,17 @@ async function submitRecording(): Promise<void> {
             session_id: moduleState.sessionId || '',
             item_id: moduleState.currentTask?.id || '',
             transcript: cleanTranscript(moduleState.transcriptText),
-            audio_data: base64Audio
+            audio_base64: base64Audio
         };
         
         // Submit for evaluation
         const evaluation = await submitAnswer(answer);
-        
-        // Get LLM-based score and feedback
-        const llmScore = await getLLMScore(
-            cleanTranscript(moduleState.transcriptText),
-            moduleState.currentTask?.prompt || '',
-            moduleState.currentTask?.guidance || ''
-        );
-        
-        // Combine backend evaluation with LLM scoring
-        const combinedEvaluation = {
-            ...evaluation,
-            llm_score: llmScore.score,
-            llm_feedback: llmScore.feedback,
-            llm_level: llmScore.level
-        };
+        moduleState.progressCurrent = evaluation.progress_current;
+        moduleState.progressTotal = evaluation.progress_total;
+        moduleState.level = evaluation.level;
         
         // Display results
-        displayEvaluationResults(combinedEvaluation);
+        displayEvaluationResults(evaluation);
         
         // Get next task
         const nextResponse = await getNextTask();
@@ -966,48 +995,66 @@ function displayEvaluationResults(evaluation: any): void {
     }
     
     console.log('Displaying evaluation results:', evaluation);
-    
-    // Check if LLM scoring is available
-    const hasLLMScore = evaluation.llm_score !== undefined;
-    const llmScore = hasLLMScore ? evaluation.llm_score : 0;
-    const llmFeedback = hasLLMScore ? evaluation.llm_feedback : 'LLM scoring unavailable';
-    const llmLevel = hasLLMScore ? evaluation.llm_level : 'N/A';
-    
-    // Backend provides pronunciation_score, not traditional score breakdown
-    const pronunciationScore = evaluation.pronunciation_score || 0;
+
+    const overallScore = typeof evaluation.overall_score === 'number'
+        ? Math.round(evaluation.overall_score)
+        : null;
+    const pronunciationScore = typeof evaluation.pronunciation_score === 'number'
+        ? Math.round(evaluation.pronunciation_score)
+        : null;
+    const audioScores = evaluation.audio_scores || {};
+    const clarityScore = typeof audioScores.clarity_score === 'number'
+        ? Math.round(audioScores.clarity_score)
+        : null;
+    const fluencyScore = typeof audioScores.fluency_score === 'number'
+        ? Math.round(audioScores.fluency_score)
+        : null;
+    const audioOverall = typeof audioScores.overall_audio_score === 'number'
+        ? Math.round(audioScores.overall_audio_score)
+        : null;
+
+    const scoreBadge = overallScore !== null
+        ? `${overallScore}/100`
+        : pronunciationScore !== null
+            ? `${pronunciationScore}/100`
+            : '—';
+
     const predictedLevel = evaluation.predicted_level || 'N/A';
     const currentLevel = evaluation.level || 'N/A';
-    const feedback = evaluation.feedback || 'No feedback available';
-    
-    resultsDiv.innerHTML = `
-        <div class="evaluation-results">
-            <div class="evaluation-header">
-                <h3 class="evaluation-title">Evaluation Results</h3>
-                <div class="evaluation-score">${pronunciationScore}/100</div>
-            </div>
-            
-            ${hasLLMScore ? `
-            <div class="llm-scoring-section">
-                <div class="llm-score-header">
-                    <h4>AI Assessment</h4>
-                    <div class="llm-score">${llmScore}/100</div>
-                </div>
-                <div class="llm-level">
-                    <span class="level-label">CEFR Level:</span>
-                    <span class="level-badge">${llmLevel}</span>
-                </div>
-                <div class="llm-feedback">
-                    <div class="feedback-label">Feedback:</div>
-                    <div class="feedback-text">${llmFeedback}</div>
-                </div>
-            </div>
-            ` : ''}
-            
-            <div class="evaluation-breakdown">
+    const accentLabel = evaluation.accent_label || 'Not detected';
+    const accentConfidence = typeof evaluation.accent_confidence === 'number'
+        ? `${Math.round(evaluation.accent_confidence * 100)}%`
+        : 'N/A';
+
+    const textFeedback = evaluation.feedback || 'No feedback available yet.';
+    const audioFeedback = evaluation.audio_feedback
+        || evaluation.pronunciation_feedback
+        || 'No audio feedback available yet.';
+
+    const pronunciationRow = pronunciationScore !== null
+        ? `
                 <div class="evaluation-item">
                     <div class="evaluation-item-label">Pronunciation</div>
                     <div class="evaluation-item-value">${pronunciationScore}/100</div>
                 </div>
+        `
+        : '';
+
+    const accentChips = [
+        `<div class="accent-chip"><span>Accent</span>${accentLabel}</div>`,
+        `<div class="accent-chip"><span>Confidence</span>${accentConfidence}</div>`,
+        audioOverall !== null ? `<div class="accent-chip"><span>Audio Score</span>${audioOverall}/100</div>` : '',
+        clarityScore !== null ? `<div class="accent-chip"><span>Clarity</span>${clarityScore}/100</div>` : '',
+        fluencyScore !== null ? `<div class="accent-chip"><span>Fluency</span>${fluencyScore}/100</div>` : '',
+    ].filter(Boolean).join('');
+
+    resultsDiv.innerHTML = `
+        <div class="evaluation-results">
+            <div class="evaluation-header">
+                <h3 class="evaluation-title">Evaluation Results</h3>
+                <div class="evaluation-score">${scoreBadge}</div>
+            </div>
+            <div class="evaluation-breakdown">
                 <div class="evaluation-item">
                     <div class="evaluation-item-label">Predicted Level</div>
                     <div class="evaluation-item-value">${predictedLevel}</div>
@@ -1016,17 +1063,19 @@ function displayEvaluationResults(evaluation: any): void {
                     <div class="evaluation-item-label">Current Level</div>
                     <div class="evaluation-item-value">${currentLevel}</div>
                 </div>
+                ${pronunciationRow}
+            </div>
+            <div class="accent-analysis">
+                ${accentChips}
             </div>
             <div class="evaluation-feedback">
-                <strong>Feedback:</strong><br>
-                ${feedback}
+                <strong>Text Feedback:</strong><br>
+                ${textFeedback}
             </div>
-            ${evaluation.pronunciation_feedback ? `
             <div class="evaluation-feedback">
-                <strong>Pronunciation Feedback:</strong><br>
-                ${evaluation.pronunciation_feedback}
+                <strong>Audio Feedback:</strong><br>
+                ${audioFeedback}
             </div>
-            ` : ''}
         </div>
     `;
     
