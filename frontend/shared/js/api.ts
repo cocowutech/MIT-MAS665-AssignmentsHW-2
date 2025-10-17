@@ -158,25 +158,67 @@ const APIUtils = {
      * Writing API methods
      */
     WritingAPI: {
-        startSession: async function(level: string): Promise<any> {
-            return APIUtils.makeRequest("/write/prompt", {
+        /**
+         * Fetch a writing prompt from the backend and normalize it to module format
+         */
+        fetchPrompt: async function(level: string): Promise<any> {
+            const promptResponse = await APIUtils.makeRequest("/write/prompt", {
                 method: "POST",
-                body: JSON.stringify({ level })
+                body: JSON.stringify({ band: level })
             });
+
+            const promptText = typeof promptResponse?.prompt === "string"
+                ? promptResponse.prompt.trim()
+                : "Write approximately 350 words about a memorable experience and what you learned from it.";
+
+            const timestampId = Date.now().toString();
+
+            return {
+                session: {
+                    session_id: promptResponse?.session_id || `local-session-${timestampId}`,
+                    asked: promptResponse?.asked ?? 0,
+                    remaining: promptResponse?.remaining ?? 1,
+                    target_cefr: promptResponse?.target_cefr || level,
+                    current_level: promptResponse?.current_level || level,
+                    current_prompt: {
+                        id: promptResponse?.prompt_id || `prompt-${timestampId}`,
+                        title: promptResponse?.title || "Writing Prompt",
+                        description: promptText,
+                        instructions: Array.isArray(promptResponse?.instructions) && promptResponse.instructions.length
+                            ? promptResponse.instructions
+                            : [
+                                "Write approximately 350 words responding to the prompt below.",
+                                "Organize your ideas into clear paragraphs with an introduction and conclusion.",
+                                "Use a range of vocabulary and grammatical structures appropriate for the topic."
+                            ],
+                        word_limit: Number(promptResponse?.word_limit) || 350,
+                        time_limit: Number(promptResponse?.time_limit) || 30,
+                        level: promptResponse?.level || level,
+                        type: promptResponse?.type || "Essay",
+                        structure_hints: Array.isArray(promptResponse?.structure_hints)
+                            ? promptResponse.structure_hints
+                            : ["Introduction", "Main points", "Conclusion"]
+                    }
+                },
+                finished: false
+            };
+        },
+
+        startSession: async function(level: string): Promise<any> {
+            return this.fetchPrompt(level);
         },
 
         submitAnswer: async function(answer: any): Promise<any> {
-            return APIUtils.makeRequest("/write/score/text", {
+            const evaluationResponse = await APIUtils.makeRequest("/write/score/text", {
                 method: "POST",
-                body: JSON.stringify(answer)
+                body: JSON.stringify({ text: answer?.text || "" })
             });
+
+            return { evaluation: evaluationResponse };
         },
 
-        getNextTask: async function(sessionId: string): Promise<any> {
-            return APIUtils.makeRequest("/write/prompt", {
-                method: "POST",
-                body: JSON.stringify({ level: "A2" })
-            });
+        getNextTask: async function(level: string = "A2"): Promise<any> {
+            return this.fetchPrompt(level);
         }
     }
 };

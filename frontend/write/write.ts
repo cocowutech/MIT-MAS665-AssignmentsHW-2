@@ -64,6 +64,69 @@ interface WritingEvaluation {
 }
 
 /**
+ * Normalize backend evaluation response to WritingEvaluation format
+ */
+function normalizeWritingEvaluation(data: any): WritingEvaluation {
+    const scores = data?.scores || {};
+    const overall = Number(data?.overall ?? 0);
+
+    const toPercent = (value: any, fallback?: number): number => {
+        const numeric = Number(value);
+        const base = Number.isFinite(numeric) ? numeric : (fallback ?? overall);
+        const clamped = Math.max(0, Math.min(base, 5));
+        return Math.round(clamped * 20);
+    };
+
+    const averageScore = (keys: string[], fallback?: number): number => {
+        const values = keys
+            .map(key => Number(scores?.[key]))
+            .filter(value => Number.isFinite(value));
+        if (!values.length) {
+            return toPercent(fallback ?? overall);
+        }
+        const total = values.reduce((sum, value) => sum + value, 0);
+        return toPercent(total / values.length, fallback ?? overall);
+    };
+
+    const suggestions = Array.isArray(data?.comments?.inline)
+        ? data.comments.inline
+            .map((item: any) => {
+                const span = typeof item?.span === 'string' ? item.span.trim() : '';
+                const comment = typeof item?.comment === 'string' ? item.comment.trim() : '';
+                if (span && comment) return `${span}: ${comment}`;
+                return span || comment || '';
+            })
+            .filter((entry: string) => entry.length > 0)
+        : undefined;
+
+    const feedbackParts: string[] = [];
+    if (data?.band) {
+        feedbackParts.push(`Estimated CEFR band: ${String(data.band)}`);
+    }
+    if (typeof data?.comments?.global === 'string' && data.comments.global.trim()) {
+        feedbackParts.push(data.comments.global.trim());
+    }
+
+    const fallbackFeedback = 'Keep refining your ideas, organization, and language control to improve your writing.';
+
+    return {
+        score: toPercent(overall, 3),
+        content_score: averageScore(['task_response', 'opinions_and_reasons'], overall),
+        organization_score: averageScore(['coherence_cohesion', 'sequencing_words'], overall),
+        language_score: averageScore([
+            'vocabulary_complexity',
+            'grammar_complexity',
+            'verb_patterns',
+            'comparatives_superlatives',
+            'accuracy'
+        ], overall),
+        feedback: feedbackParts.length ? feedbackParts.join(' • ') : fallbackFeedback,
+        suggestions,
+        level_adjustment: 0
+    };
+}
+
+/**
  * Writing session response interface
  */
 interface WritingSessionResponse {
@@ -265,11 +328,27 @@ async function startSession(): Promise<WritingSessionResponse> {
     try {
         const response = await APIUtils.WritingAPI.startSession('A2');
         moduleState.session = response.session;
-        moduleState.currentPrompt = response.session.current_prompt;
+        if (moduleState.session) {
+            moduleState.session.asked = moduleState.session.asked ?? 0;
+            moduleState.session.remaining = moduleState.session.remaining ?? 1;
+            moduleState.session.current_level = moduleState.session.current_level || 'A2';
+            moduleState.session.target_cefr = moduleState.session.target_cefr || 'A2';
+            moduleState.currentPrompt = moduleState.session.current_prompt;
+        } else {
+            moduleState.currentPrompt = null;
+        }
         moduleState.sessionStartTime = Date.now();
         moduleState.isSessionActive = true;
         return response;
     } catch (error) {
+        if (error instanceof Error) {
+            const message = error.message || '';
+            if (message.toLowerCase().includes('unauthorized') || message.includes('401')) {
+                AuthUtils.clearAuth();
+                throw new Error('Please log in to start a writing session.');
+            }
+            throw new Error(message);
+        }
         throw new Error('Failed to start session');
     }
 }
@@ -284,7 +363,7 @@ async function startSession(): Promise<WritingSessionResponse> {
 async function submitWriting(submission: WritingSubmission): Promise<WritingEvaluation> {
     try {
         const response = await APIUtils.WritingAPI.submitAnswer(submission);
-        return response.evaluation;
+        return normalizeWritingEvaluation(response.evaluation);
     } catch (error) {
         throw new Error('Failed to submit writing');
     }
@@ -298,9 +377,18 @@ async function submitWriting(submission: WritingSubmission): Promise<WritingEval
  */
 async function getNextPrompt(): Promise<WritingSessionResponse> {
     try {
-        const response = await APIUtils.WritingAPI.getNextTask();
+        const level = moduleState.session?.current_level || 'A2';
+        const response = await APIUtils.WritingAPI.getNextTask(level);
         if (response.session) {
-            moduleState.session = response.session;
+            if (!moduleState.session) {
+                moduleState.session = response.session;
+            } else {
+                moduleState.session.current_prompt = response.session.current_prompt;
+                moduleState.session.remaining = response.session.remaining ?? moduleState.session.remaining ?? 1;
+                moduleState.session.current_level = response.session.current_level || moduleState.session.current_level;
+            }
+            moduleState.session.asked = moduleState.session.asked ?? 0;
+            moduleState.session.remaining = moduleState.session.remaining ?? 1;
             moduleState.currentPrompt = response.session.current_prompt;
         }
         return response;
@@ -562,15 +650,25 @@ async function handleSubmitWriting(): Promise<void> {
         };
         
         const evaluation = await submitWriting(submission);
-        
+
+        if (moduleState.session) {
+            moduleState.session.asked = (moduleState.session.asked ?? 0) + 1;
+            moduleState.session.remaining = Math.max((moduleState.session.remaining ?? 1) - 1, 0);
+        }
+
         // Display results
         displayEvaluationResults(evaluation);
-        
+        updateProgress();
+
         // Get next prompt
         const nextResponse = await getNextPrompt();
-        
+
         if (nextResponse.finished) {
             showSessionComplete(nextResponse.final_score || 0);
+            if (submitBtn) {
+                submitBtn.textContent = 'Submit Writing';
+                (submitBtn as HTMLButtonElement).disabled = true;
+            }
         } else {
             // Show continue button
             const continueBtn = APIUtils.$element('continueBtn');
@@ -578,8 +676,12 @@ async function handleSubmitWriting(): Promise<void> {
                 continueBtn.textContent = 'Continue to Next Prompt';
                 show('continueBtn');
             }
+            if (submitBtn) {
+                submitBtn.textContent = 'Submit Writing';
+                (submitBtn as HTMLButtonElement).disabled = false;
+            }
         }
-        
+
     } catch (error) {
         console.error('Submission failed:', error);
         const status = APIUtils.$element('status');
@@ -590,7 +692,7 @@ async function handleSubmitWriting(): Promise<void> {
             (submitBtn as HTMLButtonElement).disabled = false;
         }
     }
-    
+
     moduleState.isSubmissionInProgress = false;
 }
 
@@ -608,25 +710,30 @@ async function continueToNext(): Promise<void> {
     
     try {
         const nextResponse = await getNextPrompt();
-        
+
         if (nextResponse.finished) {
             showSessionComplete(nextResponse.final_score || 0);
         } else {
             // Reset state for next prompt
             moduleState.currentText = '';
             moduleState.showResults = false;
-            
+
             // Hide results and continue button
             hide('results');
             hide('continueBtn');
-            
+
             // Display next prompt
             if (nextResponse.session.current_prompt) {
                 displayPrompt(nextResponse.session.current_prompt);
                 displayEditor();
                 moduleState.startPromptTimer();
+                const submitBtn = APIUtils.$element('submitBtn');
+                if (submitBtn) {
+                    submitBtn.textContent = 'Submit Writing';
+                    (submitBtn as HTMLButtonElement).disabled = false;
+                }
             }
-            
+
             // Update progress
             updateProgress();
         }
@@ -709,7 +816,13 @@ async function handleStartSession(): Promise<void> {
     } catch (error) {
         console.error('Start session failed:', error);
         const status = APIUtils.$element('status');
-        if (status) status.textContent = 'Failed to start session. Please try again.';
+        if (status) {
+            if (error instanceof Error) {
+                status.textContent = error.message || 'Failed to start session. Please try again.';
+            } else {
+                status.textContent = 'Failed to start session. Please try again.';
+            }
+        }
         
         if (startBtn) {
             startBtn.textContent = 'Start Writing Assessment';
