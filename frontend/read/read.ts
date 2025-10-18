@@ -126,7 +126,9 @@ class ReadingModuleState {
     public selectedAnswer: number | null = null;
     public questionStartTime: number = 0;
     public sessionStartTime: number = 0;
-    
+    public questionsAsked: number = 0;
+    public questionsRemaining: number = 0;
+
     // UI state
     public isQuestionAnswered: boolean = false;
     public showResults: boolean = false;
@@ -168,6 +170,8 @@ class ReadingModuleState {
         this.selectedAnswer = null;
         this.questionStartTime = 0;
         this.sessionStartTime = 0;
+        this.questionsAsked = 0;
+        this.questionsRemaining = 0;
         this.isQuestionAnswered = false;
         this.showResults = false;
         this.isSessionActive = false;
@@ -248,6 +252,66 @@ function calculateProgress(current: number, total: number): number {
     return Math.round((current / total) * 100);
 }
 
+/**
+ * Update local session metadata using the latest evaluation payload
+ */
+function updateSessionFromEvaluation(evaluation: ReadingEvaluation): void {
+    if (!moduleState.session) return;
+    moduleState.session.target_cefr = evaluation.updated_target_cefr;
+    moduleState.session.cambridge_level = evaluation.cambridge_level;
+    moduleState.session.passage_index = evaluation.passage_index;
+    moduleState.session.max_passages = evaluation.max_passages;
+    moduleState.session.questions_per_passage = evaluation.questions_per_passage;
+    moduleState.questionsAsked = evaluation.asked;
+    moduleState.questionsRemaining = evaluation.remaining;
+}
+
+/**
+ * Ensure the displayed passage matches the latest evaluation state
+ */
+async function refreshPassageIfNeeded(evaluation: ReadingEvaluation): Promise<void> {
+    if (!moduleState.session) return;
+
+    const nextPassageIndex = evaluation.passage_index;
+    const currentIndex = moduleState.currentPassage?.index;
+
+    // If we already have the passage text from the evaluation payload, use it directly
+    if (evaluation.new_passage) {
+        moduleState.currentPassage = {
+            text: evaluation.new_passage,
+            index: nextPassageIndex
+        };
+        displayPassage(moduleState.currentPassage);
+        return;
+    }
+
+    // When the index changes without an inline passage payload (preloaded case), fetch session state
+    if (typeof currentIndex === 'number' && currentIndex === nextPassageIndex) {
+        // Same passage; just refresh meta data so the header reflects new index/levels
+        if (moduleState.currentPassage) {
+            moduleState.currentPassage.index = nextPassageIndex;
+            displayPassage(moduleState.currentPassage);
+        }
+        return;
+    }
+
+    try {
+        const sessionState = await APIUtils.ReadingAPI.getSessionState(moduleState.session.session_id);
+        moduleState.session.target_cefr = sessionState.target_cefr;
+        moduleState.session.cambridge_level = sessionState.cambridge_level;
+        moduleState.session.passage_index = sessionState.passage_index;
+        moduleState.session.max_passages = sessionState.max_passages;
+        moduleState.session.questions_per_passage = sessionState.questions_per_passage;
+        moduleState.currentPassage = {
+            text: sessionState.passage,
+            index: sessionState.passage_index
+        };
+        displayPassage(moduleState.currentPassage);
+    } catch (error) {
+        console.warn('Failed to refresh reading passage state:', error);
+    }
+}
+
 // ============================================================================
 // AUTHENTICATION FUNCTIONS
 // ============================================================================
@@ -305,6 +369,8 @@ async function startSession(startLevel: string = 'A2'): Promise<ReadingSessionRe
         moduleState.currentQuestion = response.question;
         moduleState.sessionStartTime = Date.now();
         moduleState.isSessionActive = true;
+        moduleState.questionsAsked = response.question?.number || 1;
+        moduleState.questionsRemaining = Math.max(0, (response.total_questions || 0) - moduleState.questionsAsked);
         return response;
     } catch (error) {
         throw new Error('Failed to start session');
@@ -418,7 +484,8 @@ function updateProgress(): void {
     if (!progressDiv) return;
     
     const totalQuestions = moduleState.session?.total_questions || 15;
-    const currentQuestion = moduleState.currentQuestion?.number || 1;
+    const currentQuestionRaw = moduleState.questionsAsked || moduleState.currentQuestion?.number || 1;
+    const currentQuestion = Math.min(currentQuestionRaw, totalQuestions);
     const progress = calculateProgress(currentQuestion, totalQuestions);
     
     progressDiv.innerHTML = `
@@ -492,9 +559,13 @@ function showSessionComplete(finalScore: number): void {
     
     const sessionTime = Date.now() - moduleState.sessionStartTime;
     const finalLevel = moduleState.lastEvaluation?.updated_target_cefr || moduleState.session?.target_cefr || 'A2';
-    
+
     // Store final level for assess again functionality
     moduleState.finalLevel = finalLevel;
+    moduleState.questionsRemaining = 0;
+    if (moduleState.session) {
+        moduleState.questionsAsked = moduleState.session.total_questions;
+    }
     
     resultsDiv.innerHTML = `
         <div class="session-summary">
@@ -606,6 +677,7 @@ async function handleSubmitAnswer(): Promise<void> {
         const evaluation = await submitAnswer(answer);
         moduleState.isQuestionAnswered = true;
         moduleState.lastEvaluation = evaluation; // Store for continueToNext
+        updateSessionFromEvaluation(evaluation);
         
         // Trigger preloading after question 3
         if (moduleState.currentQuestion?.number === 3) {
@@ -669,16 +741,20 @@ async function continueToNext(): Promise<void> {
             moduleState.selectedAnswer = null;
             moduleState.isQuestionAnswered = false;
             moduleState.showResults = false;
-            
+
             // Hide results
             hide('results');
-            
+
+            // Ensure passage and session metadata reflect the new state
+            updateSessionFromEvaluation(evaluation);
+            await refreshPassageIfNeeded(evaluation);
+
             // Display next question
             if (evaluation.next_question) {
                 moduleState.currentQuestion = evaluation.next_question;
                 displayQuestion(evaluation.next_question);
             }
-            
+
             // Update progress
             updateProgress();
         }
@@ -715,6 +791,8 @@ async function handleAssessAgain(): Promise<void> {
         moduleState.showResults = false;
         moduleState.isSessionActive = false;
         moduleState.lastEvaluation = null;
+        moduleState.questionsAsked = 0;
+        moduleState.questionsRemaining = 0;
         
         // Hide results and assessment interface
         hide('results');

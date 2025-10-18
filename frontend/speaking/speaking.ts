@@ -245,6 +245,26 @@ function cleanTranscript(text: string): string {
     return s.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Convert a Blob to a base64 string without exhausting the call stack
+ */
+function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const result = reader.result;
+            if (typeof result === 'string') {
+                const base64 = result.split(',')[1] || '';
+                resolve(base64);
+            } else {
+                reject(new Error('Unexpected FileReader result type'));
+            }
+        };
+        reader.onerror = () => reject(new Error('Failed to read audio data'));
+        reader.readAsDataURL(blob);
+    });
+}
+
 // ============================================================================
 // AUTHENTICATION FUNCTIONS
 // ============================================================================
@@ -933,8 +953,7 @@ async function submitRecording(): Promise<void> {
     
     try {
         // Convert audio blob to base64
-        const arrayBuffer = await moduleState.recordedAudioBlob.arrayBuffer();
-        const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        const base64Audio = await blobToBase64(moduleState.recordedAudioBlob);
         
         // Prepare answer data
         const answer = {

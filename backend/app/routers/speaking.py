@@ -641,7 +641,13 @@ async def _assess_pronunciation(audio_base64: str, expected_transcript: str) -> 
 	if not audio_base64:
 		return {"pronunciation_score": None, "pronunciation_feedback": "No audio provided for pronunciation analysis."}
 
-	client = speech.SpeechClient()
+	try:
+		client = speech.SpeechClient()
+	except Exception as e:
+		return {
+			"pronunciation_score": None,
+			"pronunciation_feedback": f"Pronunciation assessment unavailable: {e}",
+		}
 
 	audio_content = base64.b64decode(audio_base64)
 	if not audio_content:
