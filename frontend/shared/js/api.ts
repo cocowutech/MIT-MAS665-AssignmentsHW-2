@@ -77,10 +77,34 @@ const APIUtils = {
      */
     makeRequest: async function(endpoint: string, options: RequestInit = {}): Promise<any> {
         const url = `${this.baseUrl}${endpoint}`;
-        const headers: HeadersInit = {
-            "Content-Type": "application/json",
-            ...options.headers
-        };
+        const headers: Record<string, string> = {};
+
+        if (options.headers instanceof Headers) {
+            options.headers.forEach((value, key) => {
+                headers[key] = value;
+            });
+        } else if (Array.isArray(options.headers)) {
+            options.headers.forEach(([key, value]) => {
+                headers[key] = value;
+            });
+        } else if (options.headers && typeof options.headers === "object") {
+            Object.assign(headers, options.headers as Record<string, string>);
+        }
+
+        const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+
+        if (isFormData) {
+            for (const key of Object.keys(headers)) {
+                if (key.toLowerCase() === "content-type") {
+                    delete headers[key];
+                }
+            }
+        } else {
+            const hasContentType = Object.keys(headers).some((key) => key.toLowerCase() === "content-type");
+            if (!hasContentType) {
+                headers["Content-Type"] = "application/json";
+            }
+        }
 
         if (this.authToken) {
             headers["Authorization"] = `Bearer ${this.authToken}`;
@@ -200,7 +224,7 @@ const APIUtils = {
         },
 
         getNextQuestion: async function(sessionId: string): Promise<any> {
-            return APIUtils.makeRequest("/vocabulary/next", {
+            return APIUtils.makeRequest("/vocabulary/next_question", {
                 method: "POST",
                 body: JSON.stringify({ session_id: sessionId })
             });
@@ -287,6 +311,16 @@ const APIUtils = {
                 body: JSON.stringify({ text: answer?.text || "" })
             });
 
+            return { evaluation: evaluationResponse };
+        },
+
+        submitImage: async function(file: File): Promise<any> {
+            const formData = new FormData();
+            formData.append("file", file);
+            const evaluationResponse = await APIUtils.makeRequest("/write/score/image", {
+                method: "POST",
+                body: formData
+            });
             return { evaluation: evaluationResponse };
         },
 

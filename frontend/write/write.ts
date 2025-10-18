@@ -163,6 +163,7 @@ class WritingModuleState {
     public session: WritingSession | null = null;
     public currentPrompt: WritingPrompt | null = null;
     public currentText: string = '';
+    public currentImageFile: File | null = null;
     public sessionStartTime: number = 0;
     public promptStartTime: number = 0;
     public promptTimeLimitMs: number = 0;
@@ -207,6 +208,7 @@ class WritingModuleState {
         this.session = null;
         this.currentPrompt = null;
         this.currentText = '';
+        this.currentImageFile = null;
         this.sessionStartTime = 0;
         this.promptStartTime = 0;
         this.promptDeadline = 0;
@@ -612,9 +614,22 @@ function displayEditor(): void {
                 oninput="updateWordCount()"
             ></textarea>
         </div>
+        <div class="image-upload-section">
+            <div class="editor-title" style="font-size: 16px; margin-top: 16px;">Or upload an image</div>
+            <p class="small" style="margin: 4px 0 12px 0;">We will extract text from the image and analyze it just like a typed response.</p>
+            <div class="image-upload-controls">
+                <input type="file" id="imageUploadInput" accept="image/*">
+                <button type="button" id="clearImageBtn" class="hidden" style="margin-left: 8px;">Remove image</button>
+            </div>
+            <div id="imageUploadStatus" class="small" style="margin-top: 8px;">No image selected.</div>
+        </div>
     `;
     
     show('editor');
+    const submitCard = APIUtils.$element('submitCard');
+    if (submitCard) {
+        show(submitCard);
+    }
     
     // Focus on textarea
     const textarea = APIUtils.$element('writingTextarea') as HTMLTextAreaElement;
@@ -623,7 +638,20 @@ function displayEditor(): void {
     }
 
     moduleState.currentText = '';
+    moduleState.currentImageFile = null;
     updateWordCount();
+
+    const imageInput = APIUtils.$element('imageUploadInput') as HTMLInputElement | null;
+    if (imageInput) {
+        imageInput.addEventListener('change', handleImageSelection);
+    }
+
+    const clearImageBtn = APIUtils.$element('clearImageBtn');
+    if (clearImageBtn) {
+        clearImageBtn.addEventListener('click', clearImageSelection);
+    }
+
+    clearImageSelection();
 }
 
 /**
@@ -649,6 +677,55 @@ function updateWordCount(): void {
                 wordCountDiv.style.color = '#93c5fd';
             }
         }
+    }
+}
+
+/**
+ * Handle image selection for OCR submission
+ */
+function handleImageSelection(event: Event): void {
+    const input = event.currentTarget as HTMLInputElement | null;
+    const status = APIUtils.$element('imageUploadStatus');
+    const clearBtn = APIUtils.$element('clearImageBtn');
+
+    if (!input || !status) return;
+
+    const file = input.files && input.files[0] ? input.files[0] : null;
+    moduleState.currentImageFile = file;
+
+    if (file) {
+        status.textContent = `Image selected: ${file.name}. We will analyze the extracted text instead of the typed response.`;
+        if (clearBtn) {
+            clearBtn.classList.remove('hidden');
+        }
+    } else {
+        status.textContent = 'No image selected.';
+        if (clearBtn) {
+            hide(clearBtn);
+        }
+    }
+}
+
+/**
+ * Clear selected image
+ */
+function clearImageSelection(): void {
+    const input = APIUtils.$element('imageUploadInput') as HTMLInputElement | null;
+    const status = APIUtils.$element('imageUploadStatus');
+    const clearBtn = APIUtils.$element('clearImageBtn');
+
+    if (input) {
+        input.value = '';
+    }
+
+    moduleState.currentImageFile = null;
+
+    if (status) {
+        status.textContent = 'No image selected.';
+    }
+
+    if (clearBtn) {
+        hide(clearBtn);
     }
 }
 
@@ -789,31 +866,49 @@ function showSessionComplete(finalScore: number): void {
  * Handle writing submission
  */
 async function handleSubmitWriting(): Promise<void> {
-    if (!moduleState.currentPrompt || !moduleState.currentText.trim()) {
-        alert('Please write something before submitting.');
+    if (!moduleState.currentPrompt) {
+        alert('No prompt is currently loaded.');
+        return;
+    }
+
+    const hasText = moduleState.currentText.trim().length > 0;
+    const hasImage = moduleState.currentImageFile instanceof File;
+
+    if (!hasText && !hasImage) {
+        alert('Please write something or upload an image before submitting.');
         return;
     }
     
     const submitBtn = APIUtils.$element('submitBtn');
+    const submitCard = APIUtils.$element('submitCard');
     if (submitBtn) {
         submitBtn.textContent = 'Submitting...';
         (submitBtn as HTMLButtonElement).disabled = true;
+    }
+    if (submitCard) {
+        hide(submitCard);
     }
     
     moduleState.isSubmissionInProgress = true;
     
     try {
-        const submission: WritingSubmission = {
-            prompt_id: moduleState.currentPrompt.id,
-            text: moduleState.currentText.trim(),
-            word_count: moduleState.getWordCount(),
-            time_taken: moduleState.getPromptTime()
-        };
-        
-        const evaluation = await submitWriting(submission);
+        let evaluation: WritingEvaluation;
+        if (hasImage && moduleState.currentImageFile) {
+            const imageResponse = await APIUtils.WritingAPI.submitImage(moduleState.currentImageFile);
+            evaluation = normalizeWritingEvaluation(imageResponse.evaluation);
+        } else {
+            const submission: WritingSubmission = {
+                prompt_id: moduleState.currentPrompt.id,
+                text: moduleState.currentText.trim(),
+                word_count: moduleState.getWordCount(),
+                time_taken: moduleState.getPromptTime()
+            };
+            evaluation = await submitWriting(submission);
+        }
 
         moduleState.stopPromptTimer();
         hideTimerCard();
+        clearImageSelection();
 
         if (moduleState.session) {
             moduleState.session.asked = (moduleState.session.asked ?? 0) + 1;
@@ -866,6 +961,9 @@ async function handleSubmitWriting(): Promise<void> {
             submitBtn.textContent = 'Submit Writing';
             (submitBtn as HTMLButtonElement).disabled = false;
         }
+        if (submitCard) {
+            show(submitCard);
+        }
     }
 
     moduleState.isSubmissionInProgress = false;
@@ -903,6 +1001,10 @@ async function continueToNext(): Promise<void> {
                 if (submitBtn) {
                     submitBtn.textContent = 'Submit Writing';
                     (submitBtn as HTMLButtonElement).disabled = false;
+                }
+                const submitCard = APIUtils.$element('submitCard');
+                if (submitCard) {
+                    show(submitCard);
                 }
             }
 
