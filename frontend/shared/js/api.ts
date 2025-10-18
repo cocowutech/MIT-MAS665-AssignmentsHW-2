@@ -322,9 +322,12 @@ const APIUtils = {
             return { evaluation: evaluationResponse };
         },
 
-        submitImage: async function(file: File): Promise<any> {
+        submitImage: async function(file: File, text?: string): Promise<any> {
             const formData = new FormData();
             formData.append("file", file);
+            if (typeof text === "string" && text.trim().length > 0) {
+                formData.append("text", text.trim());
+            }
             const evaluationResponse = await APIUtils.makeRequest("/write/score/image", {
                 method: "POST",
                 body: formData

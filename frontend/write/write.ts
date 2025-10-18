@@ -871,7 +871,8 @@ async function handleSubmitWriting(): Promise<void> {
         return;
     }
 
-    const hasText = moduleState.currentText.trim().length > 0;
+    const trimmedText = moduleState.currentText.trim();
+    const hasText = trimmedText.length > 0;
     const hasImage = moduleState.currentImageFile instanceof File;
 
     if (!hasText && !hasImage) {
@@ -894,12 +895,15 @@ async function handleSubmitWriting(): Promise<void> {
     try {
         let evaluation: WritingEvaluation;
         if (hasImage && moduleState.currentImageFile) {
-            const imageResponse = await APIUtils.WritingAPI.submitImage(moduleState.currentImageFile);
+            const imageResponse = await APIUtils.WritingAPI.submitImage(
+                moduleState.currentImageFile,
+                hasText ? trimmedText : undefined
+            );
             evaluation = normalizeWritingEvaluation(imageResponse.evaluation);
         } else {
             const submission: WritingSubmission = {
                 prompt_id: moduleState.currentPrompt.id,
-                text: moduleState.currentText.trim(),
+                text: trimmedText,
                 word_count: moduleState.getWordCount(),
                 time_taken: moduleState.getPromptTime()
             };

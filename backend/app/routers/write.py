@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import re
 import os
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Any, Dict, Optional
 from ..gemini_client import GeminiClient
@@ -165,27 +165,42 @@ async def score_text(req: ScoreTextRequest, user: User = Depends(get_current_use
 
 @router.post("/score/image")
 async def score_image(
-    file: UploadFile = File(...),
-    user: User = Depends(get_current_user),
+	file: UploadFile = File(...),
+	text: Optional[str] = Form(None),
+	user: User = Depends(get_current_user),
 ):
-    if pytesseract is None or Image is None:
-        raise HTTPException(
-            status_code=500,
-            detail="OCR dependencies not installed. Install system package 'tesseract-ocr' and Python packages 'pytesseract' and 'Pillow'",
-        )
-    try:
-        content = await file.read()
-        from io import BytesIO
-        img = Image.open(BytesIO(content))
-        text = pytesseract.image_to_string(img)
-        if not text.strip():
-            raise ValueError("No text recognized in the image. This could be due to a poor quality image or Tesseract not being able to process it.")
-    except pytesseract.TesseractNotFoundError:
-        raise HTTPException(
-            status_code=400,
-            detail="Tesseract OCR engine not found. Please ensure it is installed and accessible in your system's PATH, or set the TESSERACT_CMD environment variable.",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to OCR image: {e}. Ensure the uploaded file is a valid image and Tesseract is correctly configured.")
-    # Reuse text scoring
-    return await score_text(ScoreTextRequest(text=text), user)
+	if pytesseract is None or Image is None:
+		raise HTTPException(
+			status_code=500,
+			detail="OCR dependencies not installed. Install system package 'tesseract-ocr' and Python packages 'pytesseract' and 'Pillow'",
+		)
+	typed_text = (text or "").strip()
+	recognized_text = ""
+	try:
+		content = await file.read()
+		from io import BytesIO
+		img = Image.open(BytesIO(content))
+		ocr_raw_text = pytesseract.image_to_string(img)
+		recognized_text = ocr_raw_text.strip()
+		if not recognized_text and not typed_text:
+			raise ValueError("No text recognized in the image. This could be due to a poor quality image or Tesseract not being able to process it.")
+	except pytesseract.TesseractNotFoundError:
+		raise HTTPException(
+			status_code=400,
+			detail="Tesseract OCR engine not found. Please ensure it is installed and accessible in your system's PATH, or set the TESSERACT_CMD environment variable.",
+		)
+	except Exception as e:
+		raise HTTPException(status_code=400, detail=f"Failed to OCR image: {e}. Ensure the uploaded file is a valid image and Tesseract is correctly configured.")
+	# Combine typed text and OCR text if both are provided
+	parts: list[str] = []
+	if typed_text:
+		parts.append(typed_text)
+	if recognized_text:
+		parts.append(recognized_text)
+
+	combined_text = "\n\n".join(parts).strip()
+	if not combined_text:
+		raise HTTPException(status_code=400, detail="No text provided for scoring.")
+
+	# Reuse text scoring
+	return await score_text(ScoreTextRequest(text=combined_text), user)
