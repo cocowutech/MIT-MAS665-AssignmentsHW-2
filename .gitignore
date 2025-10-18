@@ -32,6 +32,7 @@ frontend/build/
 # Compiled JavaScript files in source directories (should only be in build/)
 frontend/*/*.js
 frontend/shared/js/*.js
+!frontend/shared/js/vocabulary-api-patch.js
 !frontend/build/**/*.js
 
 # PyInstaller

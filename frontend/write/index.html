@@ -112,6 +112,15 @@
 
         <!-- Assessment Interface -->
         <div id="assessment-interface" class="hidden">
+            <!-- Timer Display -->
+            <div id="timerCard" class="hidden">
+                <div class="timer-widget">
+                    <div class="timer-label">Time Remaining</div>
+                    <div id="timerValue" class="timer-value">30:00</div>
+                    <div id="timerLimit" class="timer-limit">Up to 30 minutes</div>
+                </div>
+            </div>
+
             <!-- Progress Display -->
             <div id="progress" class="hidden">
                 <!-- Progress will be populated by JavaScript -->
@@ -133,9 +142,13 @@
 	</div>
 
             <!-- Continue Button -->
-            <div class="card hidden" id="continueBtn">
-                <button onclick="continueToNext()">Continue to Next Prompt</button>
-						</div>
+            <div class="card hidden next-prompt-card" id="continueCard">
+                <div class="next-prompt-content">
+                    <div class="next-prompt-text">Ready for another challenge?</div>
+                    <button id="continueBtn" class="next-prompt-btn">Next Prompt →</button>
+                </div>
+                <div class="next-prompt-subtext">We'll load a prompt that matches your latest score.</div>
+			</div>
 					</div>
 
         <!-- Results Display -->

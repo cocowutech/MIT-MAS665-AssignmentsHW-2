@@ -3,6 +3,53 @@
  * This file provides common API functions used across modules
  */
 
+const VALID_CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
+
+const sanitizeWritingText = (value: unknown): string => {
+    if (typeof value !== "string") return "";
+    let text = value.trim();
+    if (!text) return "";
+
+    // Remove fenced code blocks
+    text = text.replace(/^```json\s*/i, "");
+    text = text.replace(/^```/i, "");
+    text = text.replace(/```$/i, "");
+
+    // Attempt to extract prompt value from inline JSON
+    const promptMatch = text.match(/"prompt"\s*:\s*"([\s\S]*?)"\s*}?$/i);
+    if (promptMatch) {
+        text = promptMatch[1];
+    }
+
+    try {
+        // Final attempt to parse as JSON
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed.prompt === "string") {
+            text = parsed.prompt;
+        }
+    } catch (_err) {
+        // Ignore parse errors; fall back to cleaned text
+    }
+
+    text = text.replace(/\\n/g, "\n").replace(/\\"/g, '"');
+
+    if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+        text = text.slice(1, -1);
+    }
+
+    return text.trim();
+};
+
+const normalizeCefrLevel = (value: unknown, fallback: string = "A2"): string => {
+    if (typeof value === "string") {
+        const level = value.trim().toUpperCase();
+        if (VALID_CEFR_LEVELS.includes(level as typeof VALID_CEFR_LEVELS[number])) {
+            return level;
+        }
+    }
+    return fallback;
+};
+
 // API utilities namespace
 const APIUtils = {
     // API base URL
@@ -107,23 +154,29 @@ const APIUtils = {
      */
     ReadingAPI: {
         startSession: async function(level: string): Promise<any> {
-            return APIUtils.makeRequest("/reading/start", {
+            return APIUtils.makeRequest("/read/session/start", {
                 method: "POST",
-                body: JSON.stringify({ level })
+                body: JSON.stringify({ start_level: level })
             });
         },
 
         submitAnswer: async function(answer: any): Promise<any> {
-            return APIUtils.makeRequest("/reading/answer", {
+            return APIUtils.makeRequest("/read/session/submit", {
                 method: "POST",
                 body: JSON.stringify(answer)
             });
         },
 
-        getNextTask: async function(sessionId: string): Promise<any> {
-            return APIUtils.makeRequest("/reading/next", {
+        getSessionState: async function(sessionId: string): Promise<any> {
+            return APIUtils.makeRequest(`/read/session/state?session_id=${encodeURIComponent(sessionId)}`, {
+                method: "GET"
+            });
+        },
+
+        preloadNextPassage: async function(payload: any): Promise<any> {
+            return APIUtils.makeRequest("/read/session/preload", {
                 method: "POST",
-                body: JSON.stringify({ session_id: sessionId })
+                body: JSON.stringify(payload)
             });
         }
     },
@@ -146,7 +199,7 @@ const APIUtils = {
             });
         },
 
-        getNextTask: async function(sessionId: string): Promise<any> {
+        getNextQuestion: async function(sessionId: string): Promise<any> {
             return APIUtils.makeRequest("/vocabulary/next", {
                 method: "POST",
                 body: JSON.stringify({ session_id: sessionId })
@@ -168,36 +221,56 @@ const APIUtils = {
             });
 
             const promptText = typeof promptResponse?.prompt === "string"
-                ? promptResponse.prompt.trim()
+                ? sanitizeWritingText(promptResponse.prompt)
                 : "Write approximately 350 words about a memorable experience and what you learned from it.";
 
             const timestampId = Date.now().toString();
+
+            const normalizedInstructions = Array.isArray(promptResponse?.instructions) && promptResponse.instructions.length
+                ? promptResponse.instructions.map((entry: unknown) => sanitizeWritingText(entry)).filter((entry: string) => entry.length > 0)
+                : [
+                    "Write approximately 350 words responding to the prompt below.",
+                    "Organize your ideas into clear paragraphs with an introduction and conclusion.",
+                    "Use a range of vocabulary and grammatical structures appropriate for the topic."
+                ];
+
+            const normalizedHints = Array.isArray(promptResponse?.structure_hints)
+                ? promptResponse.structure_hints
+                    .map((entry: unknown) => sanitizeWritingText(entry))
+                    .filter((entry: string) => entry.length > 0)
+                : ["Introduction", "Main points", "Conclusion"];
+
+            const normalizedLevel = normalizeCefrLevel(promptResponse?.level || level, level);
+            const normalizedType = typeof promptResponse?.type === "string" && promptResponse.type.trim()
+                ? promptResponse.type.trim()
+                : "Essay";
+
+            const normalizedTitle = typeof promptResponse?.title === "string" && promptResponse.title.trim()
+                ? sanitizeWritingText(promptResponse.title)
+                : "Writing Prompt";
+
+            const timeLimit = Number(promptResponse?.time_limit);
+            const normalizedTimeLimit = Number.isFinite(timeLimit) && timeLimit > 0 ? timeLimit : 30;
+            const wordLimit = Number(promptResponse?.word_limit);
+            const normalizedWordLimit = Number.isFinite(wordLimit) && wordLimit > 0 ? wordLimit : 350;
 
             return {
                 session: {
                     session_id: promptResponse?.session_id || `local-session-${timestampId}`,
                     asked: promptResponse?.asked ?? 0,
                     remaining: promptResponse?.remaining ?? 1,
-                    target_cefr: promptResponse?.target_cefr || level,
-                    current_level: promptResponse?.current_level || level,
+                    target_cefr: normalizeCefrLevel(promptResponse?.target_cefr || level, level),
+                    current_level: normalizedLevel,
                     current_prompt: {
                         id: promptResponse?.prompt_id || `prompt-${timestampId}`,
-                        title: promptResponse?.title || "Writing Prompt",
+                        title: normalizedTitle,
                         description: promptText,
-                        instructions: Array.isArray(promptResponse?.instructions) && promptResponse.instructions.length
-                            ? promptResponse.instructions
-                            : [
-                                "Write approximately 350 words responding to the prompt below.",
-                                "Organize your ideas into clear paragraphs with an introduction and conclusion.",
-                                "Use a range of vocabulary and grammatical structures appropriate for the topic."
-                            ],
-                        word_limit: Number(promptResponse?.word_limit) || 350,
-                        time_limit: Number(promptResponse?.time_limit) || 30,
-                        level: promptResponse?.level || level,
-                        type: promptResponse?.type || "Essay",
-                        structure_hints: Array.isArray(promptResponse?.structure_hints)
-                            ? promptResponse.structure_hints
-                            : ["Introduction", "Main points", "Conclusion"]
+                        instructions: normalizedInstructions,
+                        word_limit: normalizedWordLimit,
+                        time_limit: normalizedTimeLimit,
+                        level: normalizedLevel,
+                        type: normalizedType,
+                        structure_hints: normalizedHints
                     }
                 },
                 finished: false
@@ -219,6 +292,17 @@ const APIUtils = {
 
         getNextTask: async function(level: string = "A2"): Promise<any> {
             return this.fetchPrompt(level);
+        },
+
+        getDefaultLevel: async function(): Promise<string> {
+            try {
+                const response = await APIUtils.makeRequest("/write/default_band", {
+                    method: "GET"
+                });
+                return normalizeCefrLevel(response?.band, "A2");
+            } catch (_error) {
+                return "A2";
+            }
         }
     }
 };

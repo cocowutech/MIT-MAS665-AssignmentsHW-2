@@ -61,6 +61,7 @@ interface WritingEvaluation {
     feedback: string;
     suggestions?: string[];
     level_adjustment: number;
+    band?: string;
 }
 
 /**
@@ -99,9 +100,11 @@ function normalizeWritingEvaluation(data: any): WritingEvaluation {
             .filter((entry: string) => entry.length > 0)
         : undefined;
 
+    const estimatedBand = typeof data?.band === 'string' ? data.band.toUpperCase() : undefined;
+
     const feedbackParts: string[] = [];
-    if (data?.band) {
-        feedbackParts.push(`Estimated CEFR band: ${String(data.band)}`);
+    if (estimatedBand) {
+        feedbackParts.push(`Estimated CEFR band: ${estimatedBand}`);
     }
     if (typeof data?.comments?.global === 'string' && data.comments.global.trim()) {
         feedbackParts.push(data.comments.global.trim());
@@ -122,7 +125,8 @@ function normalizeWritingEvaluation(data: any): WritingEvaluation {
         ], overall),
         feedback: feedbackParts.length ? feedbackParts.join(' • ') : fallbackFeedback,
         suggestions,
-        level_adjustment: 0
+        level_adjustment: 0,
+        band: estimatedBand
     };
 }
 
@@ -161,7 +165,11 @@ class WritingModuleState {
     public currentText: string = '';
     public sessionStartTime: number = 0;
     public promptStartTime: number = 0;
-    
+    public promptTimeLimitMs: number = 0;
+    public promptDeadline: number = 0;
+    public promptTimerId: number | null = null;
+    public lastEvaluationLevel: string | null = null;
+
     // UI state
     public isSubmissionInProgress: boolean = false;
     public showResults: boolean = false;
@@ -188,6 +196,7 @@ class WritingModuleState {
 
         if (!state.isAuthenticated) {
             this.resetSessionState();
+            hideTimerCard();
         }
     }
     
@@ -200,6 +209,10 @@ class WritingModuleState {
         this.currentText = '';
         this.sessionStartTime = 0;
         this.promptStartTime = 0;
+        this.promptDeadline = 0;
+        this.promptTimeLimitMs = 0;
+        this.lastEvaluationLevel = null;
+        this.stopPromptTimer();
         this.isSubmissionInProgress = false;
         this.showResults = false;
         this.isSessionActive = false;
@@ -208,8 +221,24 @@ class WritingModuleState {
     /**
      * Start prompt timer
      */
-    public startPromptTimer(): void {
+    public startPromptTimer(limitMinutes?: number): void {
+        this.stopPromptTimer();
+        const minutes = Number.isFinite(limitMinutes) && limitMinutes ? Math.max(1, limitMinutes) : (this.currentPrompt?.time_limit ?? 30);
+        this.promptTimeLimitMs = minutes * 60 * 1000;
         this.promptStartTime = Date.now();
+        this.promptDeadline = this.promptStartTime + this.promptTimeLimitMs;
+        updateTimerDisplay();
+        this.promptTimerId = window.setInterval(() => updateTimerDisplay(), 1000);
+    }
+
+    /**
+     * Stop prompt timer
+     */
+    public stopPromptTimer(): void {
+        if (this.promptTimerId !== null) {
+            window.clearInterval(this.promptTimerId);
+            this.promptTimerId = null;
+        }
     }
     
     /**
@@ -288,6 +317,108 @@ function calculateProgress(current: number, total: number): number {
     return Math.round((current / total) * 100);
 }
 
+const TIMER_WARNING_THRESHOLD_MS = 5 * 60 * 1000;
+const VALID_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
+
+function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (char) => {
+        switch (char) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#39;';
+            default: return char;
+        }
+    });
+}
+
+function cleanPromptText(raw: string): string {
+    if (typeof raw !== 'string') return '';
+    let text = raw.trim();
+    if (!text) return '';
+    text = text.replace(/^```json\s*/i, '').replace(/^```/i, '').replace(/```$/i, '').trim();
+    const promptMatch = text.match(/"prompt"\s*:\s*"([\s\S]*?)"\s*}?$/i);
+    if (promptMatch) {
+        text = promptMatch[1];
+    }
+    text = text.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+    if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+        text = text.slice(1, -1);
+    }
+    return text.trim();
+}
+
+function formatCountdown(ms: number): string {
+    const safeMs = Math.max(0, ms);
+    const minutes = Math.floor(safeMs / 60000);
+    const seconds = Math.floor((safeMs % 60000) / 1000);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function resetTimerClasses(card: HTMLElement): void {
+    card.classList.remove('timer-warning', 'timer-expired');
+}
+
+function updateTimerDisplay(): void {
+    const timerCard = APIUtils.$element('timerCard');
+    const timerValue = APIUtils.$element('timerValue');
+    if (!timerCard || !timerValue) return;
+
+    if (!moduleState.promptDeadline) {
+        resetTimerClasses(timerCard);
+        timerValue.textContent = '—';
+        return;
+    }
+
+    const remaining = moduleState.promptDeadline - Date.now();
+
+    resetTimerClasses(timerCard);
+
+    if (remaining <= 0) {
+        moduleState.stopPromptTimer();
+        timerCard.classList.add('timer-expired');
+        timerValue.textContent = '00:00';
+        return;
+    }
+
+    if (remaining <= TIMER_WARNING_THRESHOLD_MS) {
+        timerCard.classList.add('timer-warning');
+    }
+
+    timerValue.textContent = formatCountdown(remaining);
+    show('timerCard');
+}
+
+function setTimerLimitDisplay(minutes: number): void {
+    const limitEl = APIUtils.$element('timerLimit');
+    if (!limitEl) return;
+    const rounded = Math.max(1, Math.round(minutes));
+    limitEl.textContent = `Up to ${rounded} minute${rounded === 1 ? '' : 's'}`;
+}
+
+function hideTimerCard(): void {
+    const timerCard = APIUtils.$element('timerCard');
+    if (!timerCard) return;
+    resetTimerClasses(timerCard);
+    hide(timerCard);
+}
+
+function normalizeLevel(level: string | null | undefined): string {
+    if (!level) return 'A2';
+    const upper = level.trim().toUpperCase();
+    return VALID_LEVELS.includes(upper as typeof VALID_LEVELS[number]) ? upper : 'A2';
+}
+
+function scoreToCefr(score: number): string {
+    if (!Number.isFinite(score)) return 'A2';
+    if (score >= 92) return 'C1';
+    if (score >= 84) return 'B2';
+    if (score >= 70) return 'B1';
+    if (score >= 55) return 'A2';
+    return 'A1';
+}
+
 // ============================================================================
 // AUTHENTICATION FUNCTIONS
 // ============================================================================
@@ -326,13 +457,14 @@ async function login(username: string, password: string): Promise<string> {
  */
 async function startSession(): Promise<WritingSessionResponse> {
     try {
-        const response = await APIUtils.WritingAPI.startSession('A2');
+        const startingLevel = await APIUtils.WritingAPI.getDefaultLevel();
+        const response = await APIUtils.WritingAPI.startSession(startingLevel);
         moduleState.session = response.session;
         if (moduleState.session) {
             moduleState.session.asked = moduleState.session.asked ?? 0;
             moduleState.session.remaining = moduleState.session.remaining ?? 1;
-            moduleState.session.current_level = moduleState.session.current_level || 'A2';
-            moduleState.session.target_cefr = moduleState.session.target_cefr || 'A2';
+            moduleState.session.current_level = normalizeLevel(moduleState.session.current_level || startingLevel);
+            moduleState.session.target_cefr = normalizeLevel(moduleState.session.target_cefr || startingLevel);
             moduleState.currentPrompt = moduleState.session.current_prompt;
         } else {
             moduleState.currentPrompt = null;
@@ -385,10 +517,12 @@ async function getNextPrompt(): Promise<WritingSessionResponse> {
             } else {
                 moduleState.session.current_prompt = response.session.current_prompt;
                 moduleState.session.remaining = response.session.remaining ?? moduleState.session.remaining ?? 1;
-                moduleState.session.current_level = response.session.current_level || moduleState.session.current_level;
+                moduleState.session.current_level = normalizeLevel(response.session.current_level || moduleState.session.current_level);
             }
             moduleState.session.asked = moduleState.session.asked ?? 0;
             moduleState.session.remaining = moduleState.session.remaining ?? 1;
+            moduleState.session.current_level = normalizeLevel(moduleState.session.current_level);
+            moduleState.session.target_cefr = normalizeLevel(moduleState.session.target_cefr);
             moduleState.currentPrompt = response.session.current_prompt;
         }
         return response;
@@ -408,24 +542,42 @@ async function getNextPrompt(): Promise<WritingSessionResponse> {
 function displayPrompt(prompt: WritingPrompt): void {
     const promptDiv = APIUtils.$element('prompt');
     if (!promptDiv) return;
-    
-    const instructionsHtml = prompt.instructions.map(instruction => `<li>${instruction}</li>`).join('');
-    const structureHintsHtml = prompt.structure_hints ? 
-        prompt.structure_hints.map(hint => `<span class="chip struct">${hint}</span>`).join('') : '';
+
+    moduleState.currentPrompt = prompt;
+
+    const title = escapeHtml(cleanPromptText(prompt.title));
+    const descriptionText = cleanPromptText(prompt.description || '');
+    const descriptionHtml = escapeHtml(descriptionText).replace(/\n+/g, '<br>');
+    const instructionsHtml = (prompt.instructions || [])
+        .map(instruction => `<li>${escapeHtml(cleanPromptText(instruction))}</li>`)
+        .join('');
+    const structureHintsHtml = (prompt.structure_hints || [])
+        .map(hint => `<span class="chip struct">${escapeHtml(cleanPromptText(hint))}</span>`)
+        .join('');
+
+    const level = escapeHtml(prompt.level || 'A2');
+    const type = escapeHtml(prompt.type || 'Essay');
+    const wordLimit = Number(prompt.word_limit) || 350;
+    const timeLimit = Number(prompt.time_limit) || 30;
+
+    moduleState.startPromptTimer(timeLimit);
+    setTimerLimitDisplay(timeLimit);
+    updateTimerDisplay();
+
     
     promptDiv.innerHTML = `
         <div class="writing-prompt">
             <div class="prompt-header">
-                <div class="prompt-title">${prompt.title}</div>
+                <div class="prompt-title">${title}</div>
                 <div class="prompt-meta">
-                    <span class="meta-item">Level: ${prompt.level}</span>
-                    <span class="meta-item">Type: ${prompt.type}</span>
-                    <span class="meta-item">Words: ${prompt.word_limit}</span>
-                    <span class="meta-item">Time: ${prompt.time_limit} min</span>
+                    <span class="meta-item">Level: ${level}</span>
+                    <span class="meta-item">Type: ${type}</span>
+                    <span class="meta-item">Words: ${wordLimit}</span>
+                    <span class="meta-item">Time: ${timeLimit} min</span>
                 </div>
             </div>
             <div class="prompt-body">
-                <p>${prompt.description}</p>
+                <p>${descriptionHtml}</p>
                 <div class="section-title">Instructions:</div>
                 <ul>${instructionsHtml}</ul>
                 ${structureHintsHtml ? `
@@ -437,6 +589,7 @@ function displayPrompt(prompt: WritingPrompt): void {
     `;
     
     show('prompt');
+    show('timerCard');
 }
 
 /**
@@ -468,6 +621,9 @@ function displayEditor(): void {
     if (textarea) {
         textarea.focus();
     }
+
+    moduleState.currentText = '';
+    updateWordCount();
 }
 
 /**
@@ -522,6 +678,11 @@ function updateProgress(): void {
     `;
     
     show('progress');
+
+    const headerLevelBadge = document.querySelector('.writing-level .level-badge');
+    if (headerLevelBadge && moduleState.session?.current_level) {
+        headerLevelBadge.textContent = moduleState.session.current_level;
+    }
 }
 
 /**
@@ -651,9 +812,19 @@ async function handleSubmitWriting(): Promise<void> {
         
         const evaluation = await submitWriting(submission);
 
+        moduleState.stopPromptTimer();
+        hideTimerCard();
+
         if (moduleState.session) {
             moduleState.session.asked = (moduleState.session.asked ?? 0) + 1;
             moduleState.session.remaining = Math.max((moduleState.session.remaining ?? 1) - 1, 0);
+        }
+
+        const nextLevel = normalizeLevel(evaluation.band ?? scoreToCefr(evaluation.score));
+        moduleState.lastEvaluationLevel = nextLevel;
+        if (moduleState.session) {
+            moduleState.session.current_level = nextLevel;
+            moduleState.session.target_cefr = nextLevel;
         }
 
         // Display results
@@ -671,10 +842,14 @@ async function handleSubmitWriting(): Promise<void> {
             }
         } else {
             // Show continue button
+            const continueCard = APIUtils.$element('continueCard');
             const continueBtn = APIUtils.$element('continueBtn');
             if (continueBtn) {
-                continueBtn.textContent = 'Continue to Next Prompt';
-                show('continueBtn');
+                continueBtn.textContent = 'Next Prompt →';
+                (continueBtn as HTMLButtonElement).disabled = false;
+            }
+            if (continueCard) {
+                show('continueCard');
             }
             if (submitBtn) {
                 submitBtn.textContent = 'Submit Writing';
@@ -703,6 +878,7 @@ async function continueToNext(): Promise<void> {
     if (!moduleState.session) return;
     
     const continueBtn = APIUtils.$element('continueBtn');
+    const continueCard = APIUtils.$element('continueCard');
     if (continueBtn) {
         continueBtn.textContent = 'Loading...';
         (continueBtn as HTMLButtonElement).disabled = true;
@@ -714,19 +890,15 @@ async function continueToNext(): Promise<void> {
         if (nextResponse.finished) {
             showSessionComplete(nextResponse.final_score || 0);
         } else {
-            // Reset state for next prompt
             moduleState.currentText = '';
             moduleState.showResults = false;
 
-            // Hide results and continue button
             hide('results');
-            hide('continueBtn');
+            if (continueCard) hide(continueCard);
 
-            // Display next prompt
             if (nextResponse.session.current_prompt) {
                 displayPrompt(nextResponse.session.current_prompt);
                 displayEditor();
-                moduleState.startPromptTimer();
                 const submitBtn = APIUtils.$element('submitBtn');
                 if (submitBtn) {
                     submitBtn.textContent = 'Submit Writing';
@@ -734,7 +906,6 @@ async function continueToNext(): Promise<void> {
                 }
             }
 
-            // Update progress
             updateProgress();
         }
         
@@ -744,8 +915,11 @@ async function continueToNext(): Promise<void> {
         if (status) status.textContent = 'Failed to load next prompt. Please try again.';
         
         if (continueBtn) {
-            continueBtn.textContent = 'Continue to Next Prompt';
+            continueBtn.textContent = 'Next Prompt →';
             (continueBtn as HTMLButtonElement).disabled = false;
+        }
+        if (continueCard) {
+            show('continueCard');
         }
     }
 }
@@ -807,7 +981,6 @@ async function handleStartSession(): Promise<void> {
         if (response.session.current_prompt) {
             displayPrompt(response.session.current_prompt);
             displayEditor();
-            moduleState.startPromptTimer();
         }
         
         // Update progress
@@ -868,7 +1041,8 @@ async function initializeWritingModule(): Promise<void> {
     // Initialize UI state
     hide('assessment-interface');
     hide('results');
-    hide('continueBtn');
+    hide('continueCard');
+    hideTimerCard();
 }
 
 // ============================================================================
