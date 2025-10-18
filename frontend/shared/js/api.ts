@@ -152,22 +152,30 @@ const APIUtils = {
      * Listening API methods
      */
     ListeningAPI: {
-        startSession: async function(level: string): Promise<any> {
+        startSession: async function(level?: string): Promise<any> {
+            const payload =
+                typeof level === "string" && level.trim().length > 0
+                    ? { start_level: level.trim() }
+                    : {};
             return APIUtils.makeRequest("/listen/session/start", {
                 method: "POST",
-                body: JSON.stringify({ level })
+                body: JSON.stringify(payload)
             });
         },
 
-        submitAnswer: async function(answer: any): Promise<any> {
+        submitAnswers: async function(sessionId: string, answers: any[]): Promise<any> {
             return APIUtils.makeRequest("/listen/session/submit", {
                 method: "POST",
-                body: JSON.stringify(answer)
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    answers
+                })
             });
         },
 
         getNextTask: async function(sessionId: string): Promise<any> {
-            return APIUtils.makeRequest("/listen/session/state", {
+            const endpoint = `/listen/session/state?session_id=${encodeURIComponent(sessionId)}`;
+            return APIUtils.makeRequest(endpoint, {
                 method: "GET"
             });
         }
