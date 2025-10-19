@@ -130,6 +130,10 @@ class ListeningModuleState {
     englishVoices: SpeechSynthesisVoice[] = [];
     clipVoiceMap: Record<string, string> = {};
     
+    // Level tracking
+    currentLevel: string | null = null;
+    finalLevel: string | null = null;
+    
     // TTS Configuration constants
     readonly DEFAULT_RATE = 0.92;
     readonly DEFAULT_PITCH = 1.03;
@@ -625,7 +629,12 @@ function renderResult(result: SessionResult): void {
     const correct = parseInt(String(result.correct)) || 0;
     const incorrect = parseInt(String(result.incorrect)) || 0;
     const total = parseInt(String(result.total)) || (correct + incorrect);
-    const band = result.final_level || result.estimated_band || '-'; // estimated_band is legacy - Might not be relevant anymore
+    const finalLevel = (result.final_level || result.cambridge_level || moduleState.currentLevel || '').toString();
+    moduleState.finalLevel = finalLevel || moduleState.currentLevel;
+    if (moduleState.finalLevel) {
+        moduleState.currentLevel = moduleState.finalLevel;
+    }
+    const band = finalLevel || result.estimated_band || '-'; // estimated_band is legacy - Might not be relevant anymore
     const exam = (result.exam_mapping && result.exam_mapping.exam) || '-';
     const vocab = (result.exam_mapping && result.exam_mapping.target_vocab) || [];
     const structs = (result.exam_mapping && result.exam_mapping.target_structures) || [];
@@ -646,8 +655,11 @@ function renderResult(result: SessionResult): void {
     const structsHtml = structs.map(s => 
         `<span class="pill">${String(s).replace(/</g, '&lt;')}</span>`
     ).join(' ');
-    
-    const rawJson = JSON.stringify(result, null, 2).replace(/</g, '&lt;');
+    const restartBtn = document.getElementById('restartListeningBtn') as HTMLButtonElement | null;
+    if (restartBtn) {
+        restartBtn.disabled = false;
+        restartBtn.textContent = 'Assess again';
+    }
     
     resultElement.innerHTML = `
         <div class="result-card">
@@ -663,10 +675,6 @@ function renderResult(result: SessionResult): void {
                 <div class="small" style="margin:8px 0 4px 0">Target structures:</div>
                 <div class="flex">${structsHtml || '<span class="small">—</span>'}</div>
             </div>
-            <details style="margin-top:10px">
-                <summary class="small">Raw JSON</summary>
-                <pre style="white-space:pre-wrap">${rawJson}</pre>
-            </details>
         </div>
     `;
 }
@@ -679,41 +687,87 @@ function renderResult(result: SessionResult): void {
  * Start a new listening session using shared API utilities
  * Initializes the assessment with backend API
  */
-async function startSession(): Promise<void> {
-    const startBtn = document.getElementById('startBtn') as HTMLButtonElement;
+async function startSession(levelOverride?: string): Promise<void> {
+    const startBtn = document.getElementById('startBtn') as HTMLButtonElement | null;
     const startMsg = document.getElementById('startMsg');
-    const levelInput = document.getElementById('level') as HTMLInputElement;
+    const levelInput = document.getElementById('level') as HTMLInputElement | null;
+    const resultElement = document.getElementById('result');
+    const resultSection = document.getElementById('resultSection');
+    const finishSessionBtnContainer = document.getElementById('finishSessionBtnContainer');
+    const submitBtn = document.getElementById('submitBtn') as HTMLButtonElement | null;
+    const nextClipsBtn = document.getElementById('nextClipsBtn');
+    const submitMsg = document.getElementById('submitMsg');
+    const restartBtn = document.getElementById('restartListeningBtn') as HTMLButtonElement | null;
     
-    if (!startBtn || !startMsg || !levelInput) return;
+    const desiredLevel = typeof levelOverride === 'string' && levelOverride.trim().length > 0
+        ? levelOverride.trim()
+        : (levelInput?.value?.trim() || undefined);
     
-    startBtn.disabled = true;
-    startMsg.textContent = '…';
+    if (restartBtn) {
+        restartBtn.disabled = true;
+        restartBtn.textContent = 'Starting...';
+    }
+    
+    if (startBtn) startBtn.disabled = true;
+    if (startMsg) startMsg.textContent = '…';
+    if (submitMsg) submitMsg.textContent = '';
+    if (resultElement) resultElement.innerHTML = '';
+    if (resultSection) resultSection.classList.add('hidden');
+    if (finishSessionBtnContainer) finishSessionBtnContainer.classList.add('hidden');
+    if (submitBtn) {
+        submitBtn.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Answers';
+    }
+    if (nextClipsBtn) nextClipsBtn.classList.add('hidden');
+    
+    stopSpeaking();
+    moduleState.nextClips = null;
     
     try {
         // Set auth token for API client
         APIUtils.updateAuthHeader(AuthUtils.authState.token);
         
-        const data = await APIUtils.ListeningAPI.startSession();
+        const data = await APIUtils.ListeningAPI.startSession(desiredLevel);
         
         moduleState.sessionId = data.session_id;
         moduleState.clips = (data.clips || []).map((clip: any) => ({ ...clip, _selected: undefined }));
         moduleState.asked = parseInt(String(data.asked)) || 0;
         moduleState.remaining = parseInt(String(data.remaining)) || (10 - moduleState.asked);
+        moduleState.currentLevel = data.target_cefr || desiredLevel || moduleState.currentLevel;
+        moduleState.finalLevel = null;
         
-        startMsg.textContent = `Level: ${data.target_cefr} (${data.cambridge_level}) • Questions: ${moduleState.asked}/${moduleState.asked + moduleState.remaining}`;
+        if (levelInput && moduleState.currentLevel) {
+            levelInput.value = moduleState.currentLevel;
+        }
+        
+        if (startMsg) {
+            const cefr = data.target_cefr || moduleState.currentLevel || '—';
+            const cambridge = data.cambridge_level || '—';
+            startMsg.textContent = `Level: ${cefr} (${cambridge}) • Questions: ${moduleState.asked}/${moduleState.asked + moduleState.remaining}`;
+        }
         
         const clipsCard = document.getElementById('clips-card');
         if (clipsCard) clipsCard.classList.remove('hidden');
         
         // Hide the start button since session has started
-        startBtn.classList.add('hidden');
+        if (startBtn) startBtn.classList.add('hidden');
+        if (restartBtn) {
+            restartBtn.disabled = false;
+            restartBtn.textContent = 'Assess again';
+        }
         
         renderClips();
     } catch (error) {
-        startMsg.textContent = 'Start failed';
+        if (startMsg) startMsg.textContent = 'Start failed';
         console.error('Session start error:', error);
         // Re-enable start button only on error
-        startBtn.disabled = false;
+        if (startBtn) startBtn.disabled = false;
+        if (restartBtn) {
+            restartBtn.disabled = false;
+            restartBtn.textContent = 'Assess again';
+        }
+        throw error;
     }
 }
 
@@ -748,6 +802,7 @@ async function submitAnswers(): Promise<void> {
         APIUtils.updateAuthHeader(AuthUtils.authState.token);
         
         const data: SessionSubmitResponse = await APIUtils.ListeningAPI.submitAnswers(moduleState.sessionId!, answers);
+        moduleState.currentLevel = (data as any).target_cefr || moduleState.currentLevel;
         reflectEvaluation(data.evaluated);
         
         if (data.finished) {
@@ -831,6 +886,25 @@ function loadNextClips(): void {
     renderClips();
 }
 
+/**
+ * Restart the assessment using the most recent level
+ * Mirrors the "Assess again" behavior from other modules
+ */
+async function restartAssessment(): Promise<void> {
+    const fallbackLevelInput = document.getElementById('level') as HTMLInputElement | null;
+    const fallbackLevel = moduleState.finalLevel
+        || moduleState.currentLevel
+        || fallbackLevelInput?.value
+        || undefined;
+    
+    try {
+        await startSession(fallbackLevel);
+    } catch (error) {
+        const submitMsg = document.getElementById('submitMsg');
+        if (submitMsg) submitMsg.textContent = 'Failed to restart assessment. Please try again.';
+    }
+}
+
 // ============================================================================
 // APPLICATION INITIALIZATION
 // ============================================================================
@@ -858,14 +932,21 @@ async function initializeApp(): Promise<void> {
     });
     
     const startBtn = document.getElementById('startBtn');
-    if (startBtn) startBtn.addEventListener('click', startSession);
+    if (startBtn) {
+        startBtn.addEventListener('click', () => {
+            startSession().catch(() => {
+                // Errors are surfaced via UI messages inside startSession
+            });
+        });
+    }
     
     const submitBtn = document.getElementById('submitBtn');
     if (submitBtn) submitBtn.addEventListener('click', submitAnswers);
 }
 
-// Make loadNextClips available globally for HTML onclick handler
+// Make functions available globally for HTML onclick handlers
 (window as any).loadNextClips = loadNextClips;
+(window as any).restartListeningAssessment = restartAssessment;
 
 // Initialize the application when DOM is ready
 document.addEventListener('DOMContentLoaded', initializeApp);
