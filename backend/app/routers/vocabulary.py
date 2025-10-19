@@ -114,6 +114,8 @@ Constraints:
 - The question should assess target vocabulary/structures (e.g., collocations, phrasal verbs, form/meaning/use) suitable for CEFR {level} and {exam}.
 - The item type should be a single 4-option multiple choice. Prefer gap-fill in-context, synonym-in-context, or best completion.
 - Exactly 4 options; only one correct; use plausible distractors at the same register.
+- Distractors must be unambiguously wrong for the blank (semantic or grammatical mismatch). Synonyms or paraphrases that could also complete the sentence are not allowed.
+- In the rationale, briefly explain why the correct option works and why each distractor fails.
 - Output STRICTLY JSON, no markdown, no commentary.
 
 JSON schema to return exactly:
@@ -127,10 +129,11 @@ JSON schema to return exactly:
 """.strip()
 
     last_error: Optional[Exception] = None
-    for _ in range(2):
+    for _ in range(4):
         # Use Gemini 2.0 Flash-Lite specifically for this module
-        client = GeminiClient(model="gemini-2.0-flash-lite")
+        client: Optional[GeminiClient] = None
         try:
+            client = GeminiClient(model="gemini-2.0-flash-lite")
             raw = await client.generate(prompt)
             try:
                 data = _extract_json_block(raw)
@@ -166,6 +169,12 @@ JSON schema to return exactly:
                 answer_index=answer_index_int,
                 rationale=rationale,
             )
+
+            is_unique = await _validate_unique_answer(q)
+            if not is_unique:
+                last_error = ValueError("question failed uniqueness validation")
+                continue
+
             return q
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 503:
@@ -175,11 +184,76 @@ JSON schema to return exactly:
                 last_error = e
                 continue
         finally:
-            await client.aclose()
+            if client is not None:
+                await client.aclose()
 
     # If we reach here, both attempts failed
     msg = f"LLM parse/format error: {last_error}" if last_error else "LLM error"
     raise HTTPException(status_code=502, detail=msg)
+
+
+async def _validate_unique_answer(question: Question) -> bool:
+    prompt = """
+You are validating a multiple choice vocabulary question. Inspect the passage, the question with its blank, and the four answer options.
+
+Return JSON with the following schema exactly (no extra keys, no markdown):
+{
+  "correct_indices": [int, ...],
+  "notes": string
+}
+
+"correct_indices" must list every option index (0-3) that produces a grammatically and semantically correct completion for the blank. If the sentence would remain correct or acceptable with multiple options, include all of them.
+
+Keep the notes very brief (≤40 words).
+""".strip()
+
+    options_lines = "\n".join(f"{idx}. {opt}" for idx, opt in enumerate(question.options))
+    validation_payload = f"""
+Passage:
+{question.passage}
+
+Item:
+{question.question}
+
+Options:
+{options_lines}
+
+Target answer index: {question.answer_index}
+""".strip()
+
+    client: Optional[GeminiClient] = None
+    try:
+        client = GeminiClient(model="gemini-2.0-flash-lite")
+        raw = await client.generate(f"{prompt}\n\n{validation_payload}")
+        data = _extract_json_block(raw)
+    except Exception as exc:
+        print(f"Validation parsing error: {exc}")
+        return False
+    finally:
+        if client is not None:
+            await client.aclose()
+
+    indices = data.get("correct_indices")
+    if not isinstance(indices, list):
+        return False
+    normalized: List[int] = []
+    for idx in indices:
+        val = None
+        if isinstance(idx, int):
+            val = idx
+        elif isinstance(idx, str) and idx.strip().isdigit():
+            val = int(idx.strip())
+        if val is None:
+            continue
+        if 0 <= val < len(question.options):
+            normalized.append(val)
+
+    normalized = sorted(set(normalized))
+
+    if len(normalized) != 1:
+        return False
+
+    return normalized[0] == question.answer_index
 
 
 def _adjust_level(state: _SessionState, was_correct: bool) -> None:
@@ -335,5 +409,3 @@ async def next_question(req: NextQuestionRequest, user: User = Depends(get_curre
     asyncio.create_task(_preload_questions(state, state.level_index))
 
     return NextQuestionResponse(question=q)
-
-
