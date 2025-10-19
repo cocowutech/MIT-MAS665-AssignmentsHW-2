@@ -101,6 +101,12 @@ class VocabularyModuleState {
     public showResults: boolean = false;
     public isSessionActive: boolean = false;
     public finalLevel: string | null = null;
+    
+    // Performance tracking
+    public correctAnswers: number = 0;
+    public totalAnswered: number = 0;
+    public totalQuestions: number = 0;
+    public answeredQuestionIds: Set<string> = new Set();
 
     constructor() {
         if (typeof AuthUtils !== 'undefined' && typeof AuthUtils.getAuthState === 'function') {
@@ -138,6 +144,7 @@ class VocabularyModuleState {
         this.isQuestionAnswered = false;
         this.showResults = false;
         this.isSessionActive = false;
+        this.resetPerformanceTracking();
     }
     
     /**
@@ -153,6 +160,16 @@ class VocabularyModuleState {
     public getQuestionTime(): number {
         if (this.questionStartTime === 0) return 0;
         return Date.now() - this.questionStartTime;
+    }
+
+    /**
+     * Reset counters used for score computation
+     */
+    public resetPerformanceTracking(): void {
+        this.correctAnswers = 0;
+        this.totalAnswered = 0;
+        this.totalQuestions = 0;
+        this.answeredQuestionIds.clear();
     }
 }
 
@@ -256,6 +273,7 @@ async function startSession(startLevel: string = 'A2'): Promise<VocabularySessio
         const response = await APIUtils.VocabularyAPI.startSession(startLevel);
         
         // Backend returns data at top level, not nested under 'session'
+        moduleState.resetPerformanceTracking();
         moduleState.session = {
             session_id: response.session_id,
             current_question: response.question,
@@ -267,6 +285,7 @@ async function startSession(startLevel: string = 'A2'): Promise<VocabularySessio
         moduleState.currentQuestion = response.question;
         moduleState.sessionStartTime = Date.now();
         moduleState.isSessionActive = true;
+        moduleState.totalQuestions = response.progress_total;
         
         return {
             session: moduleState.session,
@@ -388,14 +407,17 @@ function displayQuestion(question: VocabularyQuestion): void {
  * @returns Final score percentage
  */
 function calculateFinalScore(): number {
-    if (!moduleState.session) return 0;
+    const answered = moduleState.totalAnswered;
+    if (!answered) return 0;
     
-    // Simple calculation: assume 80% correct for demonstration
-    // In a real implementation, you'd track correct/incorrect answers
-    const totalQuestions = moduleState.session.asked + moduleState.session.remaining;
-    const correctAnswers = Math.floor(totalQuestions * 0.8); // 80% accuracy
+    const correct = moduleState.correctAnswers;
+    const rawScore = Math.round((correct / answered) * 100);
     
-    return Math.round((correctAnswers / totalQuestions) * 100);
+    if (!Number.isFinite(rawScore)) return 0;
+    if (rawScore < 0) return 0;
+    if (rawScore > 100) return 100;
+    
+    return rawScore;
 }
 
 /**
@@ -564,6 +586,7 @@ async function handleAssessAgain(): Promise<void> {
         moduleState.isQuestionAnswered = false;
         moduleState.showResults = false;
         moduleState.isSessionActive = false;
+        moduleState.resetPerformanceTracking();
         
         // Hide results and assessment interface
         hide('results');
@@ -667,6 +690,16 @@ async function handleSubmitAnswer(): Promise<void> {
             moduleState.session.asked = evaluation.progress_current;
             moduleState.session.remaining = evaluation.progress_total - evaluation.progress_current;
             moduleState.session.current_level = evaluation.level; // Update level based on performance
+            moduleState.totalQuestions = evaluation.progress_total;
+        }
+
+        const currentQuestionId = moduleState.currentQuestion?.id;
+        if (currentQuestionId && !moduleState.answeredQuestionIds.has(currentQuestionId)) {
+            moduleState.answeredQuestionIds.add(currentQuestionId);
+            moduleState.totalAnswered += 1;
+            if (evaluation.correct) {
+                moduleState.correctAnswers += 1;
+            }
         }
         
         // Display results

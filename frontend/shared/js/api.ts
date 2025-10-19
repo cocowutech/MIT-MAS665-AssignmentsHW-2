@@ -220,7 +220,7 @@ const APIUtils = {
         startSession: async function(level: string): Promise<any> {
             return APIUtils.makeRequest("/vocabulary/start", {
                 method: "POST",
-                body: JSON.stringify({ level })
+                body: JSON.stringify({ start_level: level })
             });
         },
 
