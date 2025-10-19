@@ -135,6 +135,8 @@ class ReadingModuleState {
     public isSessionActive: boolean = false;
     public lastEvaluation: any = null;
     public finalLevel: string | null = null;
+    public isPreloadingNextPassage: boolean = false;
+    public lastPreloadTriggerQuestion: number | null = null;
 
     constructor() {
         if (typeof AuthUtils !== 'undefined' && typeof AuthUtils.getAuthState === 'function') {
@@ -175,6 +177,8 @@ class ReadingModuleState {
         this.isQuestionAnswered = false;
         this.showResults = false;
         this.isSessionActive = false;
+        this.isPreloadingNextPassage = false;
+        this.lastPreloadTriggerQuestion = null;
     }
     
     /**
@@ -250,6 +254,36 @@ function formatTime(ms: number): string {
 function calculateProgress(current: number, total: number): number {
     if (total === 0) return 0;
     return Math.round((current / total) * 100);
+}
+
+/**
+ * Determine whether we should kick off a background preload for the next passage
+ */
+function shouldPreloadNextPassage(questionNumber: number | null): boolean {
+    if (!moduleState.session) return false;
+    if (typeof questionNumber !== 'number' || questionNumber < 3) return false;
+    const perPassage = moduleState.session.questions_per_passage || 0;
+    if (perPassage === 0) return false;
+    return (questionNumber - 3) % perPassage === 0;
+}
+
+/**
+ * Fire-and-forget preload of the next passage without blocking the UI
+ */
+function schedulePreloadNextPassage(payload: ReadingAnswer, questionNumber: number | null): void {
+    if (!shouldPreloadNextPassage(questionNumber)) return;
+    if (moduleState.isPreloadingNextPassage) return;
+    if (moduleState.lastPreloadTriggerQuestion === questionNumber) return;
+
+    moduleState.isPreloadingNextPassage = true;
+    moduleState.lastPreloadTriggerQuestion = questionNumber;
+
+    APIUtils.ReadingAPI.preloadNextPassage(payload)
+        .then(() => console.log('Next passage preloaded successfully'))
+        .catch((error: unknown) => console.log('Preloading failed (non-critical):', error))
+        .finally(() => {
+            moduleState.isPreloadingNextPassage = false;
+        });
 }
 
 /**
@@ -371,6 +405,8 @@ async function startSession(startLevel: string = 'A2'): Promise<ReadingSessionRe
         moduleState.isSessionActive = true;
         moduleState.questionsAsked = response.question?.number || 1;
         moduleState.questionsRemaining = Math.max(0, (response.total_questions || 0) - moduleState.questionsAsked);
+        moduleState.isPreloadingNextPassage = false;
+        moduleState.lastPreloadTriggerQuestion = null;
         return response;
     } catch (error) {
         throw new Error('Failed to start session');
@@ -551,14 +587,17 @@ function displayEvaluationResults(evaluation: ReadingEvaluation): void {
 
 /**
  * Show session completion screen
- * @param finalScore - Final session score
+ * @param correctCount - Total number of correct answers
+ * @param totalQuestions - Total number of questions in the session
  */
-function showSessionComplete(finalScore: number): void {
+function showSessionComplete(correctCount: number, totalQuestions?: number): void {
     const resultsDiv = APIUtils.$element('results');
     if (!resultsDiv) return;
     
     const sessionTime = Date.now() - moduleState.sessionStartTime;
     const finalLevel = moduleState.lastEvaluation?.updated_target_cefr || moduleState.session?.target_cefr || 'A2';
+    const total = totalQuestions ?? moduleState.session?.total_questions ?? moduleState.lastEvaluation?.summary?.total ?? 0;
+    const finalScoreDisplay = total > 0 ? `${correctCount}/${total}` : `${correctCount}`;
 
     // Store final level for assess again functionality
     moduleState.finalLevel = finalLevel;
@@ -573,7 +612,7 @@ function showSessionComplete(finalScore: number): void {
             <div class="summary-stats">
                 <div class="summary-stat">
                     <div class="summary-stat-label">Final Score</div>
-                    <div class="summary-stat-value">${finalScore}/100</div>
+                    <div class="summary-stat-value">${finalScoreDisplay}</div>
                 </div>
                 <div class="summary-stat">
                     <div class="summary-stat-label">Questions</div>
@@ -679,22 +718,18 @@ async function handleSubmitAnswer(): Promise<void> {
         moduleState.lastEvaluation = evaluation; // Store for continueToNext
         updateSessionFromEvaluation(evaluation);
         
-        // Trigger preloading after question 3
-        if (moduleState.currentQuestion?.number === 3) {
-            try {
-                await APIUtils.ReadingAPI.preloadNextPassage(answer);
-                console.log('Next passage preloaded successfully');
-            } catch (error) {
-                console.log('Preloading failed (non-critical):', error);
-            }
-        }
+        // Kick off background preload after the third question in each passage
+        schedulePreloadNextPassage(answer, moduleState.currentQuestion?.number ?? null);
         
         // Display results
         displayEvaluationResults(evaluation);
         
         // Check if session is finished or get next question from submit response
         if (evaluation.finished) {
-            showSessionComplete(evaluation.summary?.correct || 0);
+            showSessionComplete(
+                evaluation.summary?.correct || 0,
+                evaluation.summary?.total ?? (moduleState.session?.total_questions || 0)
+            );
         } else if (evaluation.next_question) {
             // Update submit button to continue button
             if (submitBtn) {
@@ -735,7 +770,10 @@ async function continueToNext(): Promise<void> {
         }
         
         if (evaluation.finished) {
-            showSessionComplete(evaluation.summary?.correct || 0);
+            showSessionComplete(
+                evaluation.summary?.correct || 0,
+                evaluation.summary?.total ?? (moduleState.session?.total_questions || 0)
+            );
         } else {
             // Reset state for next question
             moduleState.selectedAnswer = null;
@@ -793,6 +831,8 @@ async function handleAssessAgain(): Promise<void> {
         moduleState.lastEvaluation = null;
         moduleState.questionsAsked = 0;
         moduleState.questionsRemaining = 0;
+        moduleState.isPreloadingNextPassage = false;
+        moduleState.lastPreloadTriggerQuestion = null;
         
         // Hide results and assessment interface
         hide('results');
