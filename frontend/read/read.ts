@@ -107,6 +107,47 @@ interface ReadingSessionResponse {
 declare const AuthUtils: any;
 declare const APIUtils: any;
 
+const DEFAULT_START_LEVEL = 'A2';
+const START_LEVEL_STORAGE_PREFIX = 'readingModuleLastLevel:';
+
+function buildStartLevelStorageKey(username: string | null): string | null {
+    if (!username || username.trim().length === 0) return null;
+    return `${START_LEVEL_STORAGE_PREFIX}${username}`;
+}
+
+function loadPersistedStartLevel(username: string | null): string | null {
+    const key = buildStartLevelStorageKey(username);
+    if (!key) return null;
+    try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+            const stored = window.localStorage.getItem(key);
+            return stored && stored.trim().length > 0 ? stored : null;
+        }
+    } catch (error) {
+        console.warn('Unable to load stored start level:', error);
+    }
+    return null;
+}
+
+function persistStartLevel(username: string | null, level: string): void {
+    const key = buildStartLevelStorageKey(username);
+    if (!key) return;
+    try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem(key, level);
+        }
+    } catch (error) {
+        console.warn('Unable to persist start level:', error);
+    }
+}
+
+function updateStartingLevelDisplay(level: string): void {
+    const badge = APIUtils.$element('startingLevel');
+    if (badge) {
+        badge.textContent = level;
+    }
+}
+
 // ============================================================================
 // READING MODULE STATE MANAGEMENT
 // ============================================================================
@@ -159,6 +200,16 @@ class ReadingModuleState {
 
         if (!state.isAuthenticated) {
             this.resetSessionState();
+            this.finalLevel = null;
+            updateStartingLevelDisplay(DEFAULT_START_LEVEL);
+        } else {
+            const storedLevel = loadPersistedStartLevel(this.username);
+            if (storedLevel) {
+                this.finalLevel = storedLevel;
+            } else if (!this.finalLevel) {
+                this.finalLevel = DEFAULT_START_LEVEL;
+            }
+            updateStartingLevelDisplay(this.finalLevel || DEFAULT_START_LEVEL);
         }
     }
     
@@ -383,7 +434,7 @@ async function login(username: string, password: string): Promise<string> {
  * @returns Session data with first reading task
  * @throws Error if session initialization fails
  */
-async function startSession(startLevel: string = 'A2'): Promise<ReadingSessionResponse> {
+async function startSession(startLevel: string = DEFAULT_START_LEVEL): Promise<ReadingSessionResponse> {
     try {
         const response = await APIUtils.ReadingAPI.startSession(startLevel);
         // Backend returns data at top level, not nested under 'session'
@@ -463,7 +514,7 @@ function displayPassage(passage: ReadingPassage): void {
             <div class="passage-title">Reading Passage ${passage.index}</div>
             <div class="passage-text">${passage.text}</div>
             <div class="passage-meta">
-                Level: ${moduleState.session?.target_cefr || 'A2'} | Cambridge: ${moduleState.session?.cambridge_level || 'KET'}
+                Level: ${moduleState.session?.target_cefr || DEFAULT_START_LEVEL} | Cambridge: ${moduleState.session?.cambridge_level || 'KET'}
             </div>
         </div>
     `;
@@ -529,7 +580,7 @@ function updateProgress(): void {
             <div class="progress-info">
                 <span class="progress-text">Progress: ${currentQuestion}/${totalQuestions}</span>
                 <span class="reading-level">
-                    Level: <span class="level-badge">${moduleState.session?.target_cefr || 'A2'}</span>
+                    Level: <span class="level-badge">${moduleState.session?.target_cefr || DEFAULT_START_LEVEL}</span>
                 </span>
             </div>
             <div class="progress-bar">
@@ -551,6 +602,15 @@ function displayEvaluationResults(evaluation: ReadingEvaluation): void {
     
     const isCorrect = evaluation.correct;
     const scoreColor = isCorrect ? '#22c55e' : '#ef4444';
+    const totalQuestions =
+        evaluation.summary?.total ??
+        moduleState.session?.total_questions ??
+        (evaluation.asked + evaluation.remaining);
+    let completedQuestions = evaluation.finished ? evaluation.asked : evaluation.asked - 1;
+    if (completedQuestions < 0) completedQuestions = 0;
+    if (totalQuestions > 0 && completedQuestions > totalQuestions) {
+        completedQuestions = totalQuestions;
+    }
     
     resultsDiv.innerHTML = `
         <div class="reading-results">
@@ -562,8 +622,8 @@ function displayEvaluationResults(evaluation: ReadingEvaluation): void {
             </div>
             <div class="results-breakdown">
                 <div class="result-item">
-                    <div class="result-label">Progress</div>
-                    <div class="result-value">${evaluation.asked}/${evaluation.asked + evaluation.remaining}</div>
+                    <div class="result-label">Progress Completed</div>
+                    <div class="result-value">${completedQuestions}/${totalQuestions}</div>
                 </div>
                 <div class="result-item">
                     <div class="result-label">Time</div>
@@ -595,12 +655,14 @@ function showSessionComplete(correctCount: number, totalQuestions?: number): voi
     if (!resultsDiv) return;
     
     const sessionTime = Date.now() - moduleState.sessionStartTime;
-    const finalLevel = moduleState.lastEvaluation?.updated_target_cefr || moduleState.session?.target_cefr || 'A2';
+    const finalLevel = moduleState.lastEvaluation?.updated_target_cefr || moduleState.session?.target_cefr || DEFAULT_START_LEVEL;
     const total = totalQuestions ?? moduleState.session?.total_questions ?? moduleState.lastEvaluation?.summary?.total ?? 0;
     const finalScoreDisplay = total > 0 ? `${correctCount}/${total}` : `${correctCount}`;
 
     // Store final level for assess again functionality
     moduleState.finalLevel = finalLevel;
+    persistStartLevel(moduleState.username, finalLevel);
+    updateStartingLevelDisplay(finalLevel);
     moduleState.questionsRemaining = 0;
     if (moduleState.session) {
         moduleState.questionsAsked = moduleState.session.total_questions;
@@ -839,7 +901,7 @@ async function handleAssessAgain(): Promise<void> {
         hide('assessment-interface');
         
         // Start new session with final level
-        const startLevel = moduleState.finalLevel || 'A2';
+        const startLevel = moduleState.finalLevel || DEFAULT_START_LEVEL;
         await startSession(startLevel);
         
         // Show assessment interface
@@ -915,8 +977,8 @@ async function handleStartSession(): Promise<void> {
     }
     
     try {
-        // Use final level from previous assessment if available, otherwise default to A2
-        const startLevel = moduleState.finalLevel || 'A2';
+        // Use prior final level when available, otherwise fall back to the default entry level
+        const startLevel = moduleState.finalLevel || DEFAULT_START_LEVEL;
         const response = await startSession(startLevel);
         
         // Hide start button and show assessment interface
@@ -972,6 +1034,8 @@ async function initializeReadingModule(): Promise<void> {
     if (submitBtn) {
         submitBtn.addEventListener('click', handleSubmitAnswer);
     }
+    
+    updateStartingLevelDisplay(moduleState.finalLevel || DEFAULT_START_LEVEL);
     
     // Continue button functionality is now handled by submitBtn
     
