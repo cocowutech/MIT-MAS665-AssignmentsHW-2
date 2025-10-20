@@ -608,6 +608,35 @@ function reflectEvaluation(results: EvaluationResult[]): void {
 }
 
 /**
+ * Ensure the restart button exists, displays the right label, and restarts the
+ * assessment when clicked. Returns the button for further adjustments.
+ */
+function configureRestartButton(state: 'ready' | 'busy' = 'ready'): HTMLButtonElement | null {
+    const container = document.getElementById('finishSessionBtnContainer');
+    if (!container) return null;
+    
+    let button = container.querySelector('#restartListeningBtn') as HTMLButtonElement | null;
+    if (!button) {
+        button = container.querySelector('button') as HTMLButtonElement | null;
+        if (!button) {
+            button = document.createElement('button');
+            container.appendChild(button);
+        }
+    }
+    
+    button.id = 'restartListeningBtn';
+    button.textContent = state === 'busy' ? 'Starting...' : 'Assess again';
+    button.disabled = state === 'busy';
+    button.onclick = () => {
+        restartAssessment().catch(() => {
+            // restartAssessment surfaces its own error feedback
+        });
+    };
+    
+    return button;
+}
+
+/**
  * Render final session results
  * Displays comprehensive assessment results and recommendations
  * @param result - Complete session result data
@@ -655,11 +684,7 @@ function renderResult(result: SessionResult): void {
     const structsHtml = structs.map(s => 
         `<span class="pill">${String(s).replace(/</g, '&lt;')}</span>`
     ).join(' ');
-    const restartBtn = document.getElementById('restartListeningBtn') as HTMLButtonElement | null;
-    if (restartBtn) {
-        restartBtn.disabled = false;
-        restartBtn.textContent = 'Assess again';
-    }
+    configureRestartButton('ready');
     
     resultElement.innerHTML = `
         <div class="result-card">
@@ -697,16 +722,11 @@ async function startSession(levelOverride?: string): Promise<void> {
     const submitBtn = document.getElementById('submitBtn') as HTMLButtonElement | null;
     const nextClipsBtn = document.getElementById('nextClipsBtn');
     const submitMsg = document.getElementById('submitMsg');
-    const restartBtn = document.getElementById('restartListeningBtn') as HTMLButtonElement | null;
+    const restartBtn = configureRestartButton('busy');
     
     const desiredLevel = typeof levelOverride === 'string' && levelOverride.trim().length > 0
         ? levelOverride.trim()
         : (levelInput?.value?.trim() || undefined);
-    
-    if (restartBtn) {
-        restartBtn.disabled = true;
-        restartBtn.textContent = 'Starting...';
-    }
     
     if (startBtn) startBtn.disabled = true;
     if (startMsg) startMsg.textContent = '…';
@@ -752,10 +772,7 @@ async function startSession(levelOverride?: string): Promise<void> {
         
         // Hide the start button since session has started
         if (startBtn) startBtn.classList.add('hidden');
-        if (restartBtn) {
-            restartBtn.disabled = false;
-            restartBtn.textContent = 'Assess again';
-        }
+        configureRestartButton('ready');
         
         renderClips();
     } catch (error) {
@@ -763,10 +780,7 @@ async function startSession(levelOverride?: string): Promise<void> {
         console.error('Session start error:', error);
         // Re-enable start button only on error
         if (startBtn) startBtn.disabled = false;
-        if (restartBtn) {
-            restartBtn.disabled = false;
-            restartBtn.textContent = 'Assess again';
-        }
+        configureRestartButton('ready');
         throw error;
     }
 }
@@ -942,6 +956,9 @@ async function initializeApp(): Promise<void> {
     
     const submitBtn = document.getElementById('submitBtn');
     if (submitBtn) submitBtn.addEventListener('click', submitAnswers);
+    
+    // Ensure restart button is ready even before first session completes
+    configureRestartButton('ready');
 }
 
 // Make functions available globally for HTML onclick handlers

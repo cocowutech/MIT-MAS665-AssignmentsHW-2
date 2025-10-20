@@ -38,6 +38,7 @@ interface WritingSession {
     remaining: number;
     target_cefr: string;
     current_level: string;
+    total?: number;
 }
 
 /**
@@ -170,6 +171,8 @@ class WritingModuleState {
     public promptDeadline: number = 0;
     public promptTimerId: number | null = null;
     public lastEvaluationLevel: string | null = null;
+    public lastEvaluationScore: number | null = null;
+    public evaluationScores: number[] = [];
 
     // UI state
     public isSubmissionInProgress: boolean = false;
@@ -214,6 +217,8 @@ class WritingModuleState {
         this.promptDeadline = 0;
         this.promptTimeLimitMs = 0;
         this.lastEvaluationLevel = null;
+        this.lastEvaluationScore = null;
+        this.evaluationScores = [];
         this.stopPromptTimer();
         this.isSubmissionInProgress = false;
         this.showResults = false;
@@ -321,6 +326,17 @@ function calculateProgress(current: number, total: number): number {
 
 const TIMER_WARNING_THRESHOLD_MS = 5 * 60 * 1000;
 const VALID_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
+const TOTAL_WRITING_TASKS = 3;
+
+function getSessionAverageScore(): number {
+    if (moduleState.evaluationScores.length === 0) {
+        const fallback = moduleState.lastEvaluationScore ?? 0;
+        return Math.max(0, Math.min(100, Math.round(fallback)));
+    }
+    const total = moduleState.evaluationScores.reduce((sum, score) => sum + score, 0);
+    const average = total / moduleState.evaluationScores.length;
+    return Math.max(0, Math.min(100, Math.round(average)));
+}
 
 function escapeHtml(value: string): string {
     return value.replace(/[&<>"']/g, (char) => {
@@ -463,15 +479,24 @@ async function startSession(): Promise<WritingSessionResponse> {
         const response = await APIUtils.WritingAPI.startSession(startingLevel);
         moduleState.session = response.session;
         if (moduleState.session) {
-            moduleState.session.asked = moduleState.session.asked ?? 0;
-            moduleState.session.remaining = moduleState.session.remaining ?? 1;
+            const totalTasks = TOTAL_WRITING_TASKS;
+            moduleState.session.total = totalTasks;
+            moduleState.session.asked = 0;
+            moduleState.session.remaining = totalTasks;
             moduleState.session.current_level = normalizeLevel(moduleState.session.current_level || startingLevel);
             moduleState.session.target_cefr = normalizeLevel(moduleState.session.target_cefr || startingLevel);
             moduleState.currentPrompt = moduleState.session.current_prompt;
+            if (response.session) {
+                response.session.total = moduleState.session.total;
+                response.session.asked = moduleState.session.asked;
+                response.session.remaining = moduleState.session.remaining;
+            }
         } else {
             moduleState.currentPrompt = null;
         }
         moduleState.sessionStartTime = Date.now();
+        moduleState.evaluationScores = [];
+        moduleState.lastEvaluationScore = null;
         moduleState.isSessionActive = true;
         return response;
     } catch (error) {
@@ -510,24 +535,48 @@ async function submitWriting(submission: WritingSubmission): Promise<WritingEval
  * @throws Error if request fails
  */
 async function getNextPrompt(): Promise<WritingSessionResponse> {
+    const existingSession = moduleState.session;
+    const totalTasks = existingSession?.total ?? TOTAL_WRITING_TASKS;
+    const askedCount = existingSession?.asked ?? 0;
+
+    if (existingSession && askedCount >= totalTasks) {
+        existingSession.remaining = 0;
+        return {
+            session: existingSession,
+            finished: true,
+            final_score: getSessionAverageScore()
+        };
+    }
+
     try {
         const level = moduleState.session?.current_level || 'A2';
         const response = await APIUtils.WritingAPI.getNextTask(level);
-        if (response.session) {
-            if (!moduleState.session) {
-                moduleState.session = response.session;
-            } else {
-                moduleState.session.current_prompt = response.session.current_prompt;
-                moduleState.session.remaining = response.session.remaining ?? moduleState.session.remaining ?? 1;
-                moduleState.session.current_level = normalizeLevel(response.session.current_level || moduleState.session.current_level);
-            }
-            moduleState.session.asked = moduleState.session.asked ?? 0;
-            moduleState.session.remaining = moduleState.session.remaining ?? 1;
-            moduleState.session.current_level = normalizeLevel(moduleState.session.current_level);
-            moduleState.session.target_cefr = normalizeLevel(moduleState.session.target_cefr);
-            moduleState.currentPrompt = response.session.current_prompt;
+        const nextPrompt = response.session?.current_prompt ?? null;
+
+        if (!moduleState.session) {
+            moduleState.session = response.session ?? null;
         }
-        return response;
+
+        if (moduleState.session) {
+            moduleState.session.total = moduleState.session.total ?? TOTAL_WRITING_TASKS;
+            if (nextPrompt) {
+                moduleState.session.current_prompt = nextPrompt;
+            }
+            moduleState.session.current_level = normalizeLevel(response.session?.current_level || moduleState.session.current_level);
+            moduleState.session.target_cefr = normalizeLevel(response.session?.target_cefr || moduleState.session.target_cefr);
+            const askedSoFar = moduleState.session.asked ?? 0;
+            moduleState.session.remaining = Math.max((moduleState.session.total ?? TOTAL_WRITING_TASKS) - askedSoFar, 0);
+            moduleState.currentPrompt = nextPrompt;
+        }
+
+        const sessionSnapshot = moduleState.session
+            ? { ...moduleState.session, current_prompt: moduleState.session.current_prompt }
+            : response.session;
+
+        return {
+            session: sessionSnapshot as WritingSession,
+            finished: false
+        };
     } catch (error) {
         throw new Error('Failed to get next prompt');
     }
@@ -738,12 +787,19 @@ function updateProgress(): void {
     const progressDiv = APIUtils.$element('progress');
     if (!progressDiv) return;
     
-    const progress = calculateProgress(moduleState.session.asked, moduleState.session.asked + moduleState.session.remaining);
+    const rawTotal = moduleState.session.total ?? (moduleState.session.asked + moduleState.session.remaining);
+    const total = rawTotal > 0 ? rawTotal : TOTAL_WRITING_TASKS;
+    const asked = Math.min(moduleState.session.asked, total);
+    const remaining = Math.max(total - asked, 0);
+    if (moduleState.session.remaining !== remaining) {
+        moduleState.session.remaining = remaining;
+    }
+    const progress = calculateProgress(asked, total);
     
     progressDiv.innerHTML = `
         <div class="writing-progress">
             <div class="progress-info">
-                <span class="progress-text">Progress: ${moduleState.session.asked}/${moduleState.session.asked + moduleState.session.remaining}</span>
+                <span class="progress-text">Progress: ${asked}/${total}</span>
                 <span class="writing-level">
                     Level: <span class="level-badge">${moduleState.session.current_level}</span>
                 </span>
@@ -882,6 +938,7 @@ async function handleSubmitWriting(): Promise<void> {
     
     const submitBtn = APIUtils.$element('submitBtn');
     const submitCard = APIUtils.$element('submitCard');
+    const status = APIUtils.$element('status');
     if (submitBtn) {
         submitBtn.textContent = 'Submitting...';
         (submitBtn as HTMLButtonElement).disabled = true;
@@ -893,14 +950,34 @@ async function handleSubmitWriting(): Promise<void> {
     moduleState.isSubmissionInProgress = true;
     
     try {
-        let evaluation: WritingEvaluation;
+        let evaluation: WritingEvaluation | null = null;
+        let imageWarning: string | null = null;
+
         if (hasImage && moduleState.currentImageFile) {
-            const imageResponse = await APIUtils.WritingAPI.submitImage(
-                moduleState.currentImageFile,
-                hasText ? trimmedText : undefined
-            );
-            evaluation = normalizeWritingEvaluation(imageResponse.evaluation);
-        } else {
+            try {
+                const imageResponse = await APIUtils.WritingAPI.submitImage(
+                    moduleState.currentImageFile,
+                    hasText ? trimmedText : undefined
+                );
+                evaluation = normalizeWritingEvaluation(imageResponse.evaluation);
+            } catch (imageError) {
+                console.warn('Image submission failed; falling back to text', imageError);
+                if (hasText) {
+                    imageWarning = 'We could not read the image clearly, so your typed response was evaluated instead.';
+                } else {
+                    const message = 'We could not read the uploaded image. Please try again with a clearer photo or type your response.';
+                    if (status) {
+                        status.textContent = message;
+                    } else {
+                        alert(message);
+                    }
+                    const errorToThrow = imageError instanceof Error ? imageError : new Error(message);
+                    throw errorToThrow;
+                }
+            }
+        }
+
+        if (!evaluation) {
             const submission: WritingSubmission = {
                 prompt_id: moduleState.currentPrompt.id,
                 text: trimmedText,
@@ -910,14 +987,33 @@ async function handleSubmitWriting(): Promise<void> {
             evaluation = await submitWriting(submission);
         }
 
+        if (!evaluation) {
+            throw new Error('Unable to score writing. Please try again.');
+        }
+
+        if (imageWarning) {
+            if (status) {
+                status.textContent = imageWarning;
+            } else {
+                alert(imageWarning);
+            }
+        } else if (status) {
+            status.textContent = '';
+        }
+
         moduleState.stopPromptTimer();
         hideTimerCard();
         clearImageSelection();
 
         if (moduleState.session) {
-            moduleState.session.asked = (moduleState.session.asked ?? 0) + 1;
-            moduleState.session.remaining = Math.max((moduleState.session.remaining ?? 1) - 1, 0);
+            const totalTasks = moduleState.session.total ?? TOTAL_WRITING_TASKS;
+            const asked = Math.min((moduleState.session.asked ?? 0) + 1, totalTasks);
+            moduleState.session.asked = asked;
+            moduleState.session.remaining = Math.max(totalTasks - asked, 0);
         }
+
+        moduleState.lastEvaluationScore = evaluation.score;
+        moduleState.evaluationScores.push(evaluation.score);
 
         const nextLevel = normalizeLevel(evaluation.band ?? scoreToCefr(evaluation.score));
         moduleState.lastEvaluationLevel = nextLevel;
@@ -930,17 +1026,20 @@ async function handleSubmitWriting(): Promise<void> {
         displayEvaluationResults(evaluation);
         updateProgress();
 
-        // Get next prompt
-        const nextResponse = await getNextPrompt();
+        const sessionComplete = !!moduleState.session && (moduleState.session.asked ?? 0) >= (moduleState.session.total ?? TOTAL_WRITING_TASKS);
 
-        if (nextResponse.finished) {
-            showSessionComplete(nextResponse.final_score || 0);
+        if (sessionComplete) {
+            const finalScore = getSessionAverageScore();
+            showSessionComplete(finalScore);
+            const continueCard = APIUtils.$element('continueCard');
+            if (continueCard) {
+                hide(continueCard);
+            }
             if (submitBtn) {
                 submitBtn.textContent = 'Submit Writing';
                 (submitBtn as HTMLButtonElement).disabled = true;
             }
         } else {
-            // Show continue button
             const continueCard = APIUtils.$element('continueCard');
             const continueBtn = APIUtils.$element('continueBtn');
             if (continueBtn) {
@@ -958,8 +1057,12 @@ async function handleSubmitWriting(): Promise<void> {
 
     } catch (error) {
         console.error('Submission failed:', error);
-        const status = APIUtils.$element('status');
-        if (status) status.textContent = 'Submission failed. Please try again.';
+        if (status) {
+            const errorMessage = error instanceof Error && error.message
+                ? error.message
+                : 'Submission failed. Please try again.';
+            status.textContent = errorMessage;
+        }
         
         if (submitBtn) {
             submitBtn.textContent = 'Submit Writing';
@@ -981,6 +1084,20 @@ async function continueToNext(): Promise<void> {
     
     const continueBtn = APIUtils.$element('continueBtn');
     const continueCard = APIUtils.$element('continueCard');
+    const totalTasks = moduleState.session.total ?? TOTAL_WRITING_TASKS;
+    const askedCount = moduleState.session.asked ?? 0;
+    if (askedCount >= totalTasks) {
+        if (continueBtn) {
+            continueBtn.textContent = 'Next Prompt →';
+            (continueBtn as HTMLButtonElement).disabled = true;
+        }
+        if (continueCard) {
+            hide(continueCard);
+        }
+        showSessionComplete(getSessionAverageScore());
+        return;
+    }
+
     if (continueBtn) {
         continueBtn.textContent = 'Loading...';
         (continueBtn as HTMLButtonElement).disabled = true;
@@ -991,6 +1108,9 @@ async function continueToNext(): Promise<void> {
 
         if (nextResponse.finished) {
             showSessionComplete(nextResponse.final_score || 0);
+            if (continueCard) {
+                hide(continueCard);
+            }
         } else {
             moduleState.currentText = '';
             moduleState.showResults = false;

@@ -216,9 +216,10 @@
                 <button id="continueBtn">Next Assignment</button>
             </div>
             <div class="hidden" style="margin-top: 16px;" id="finishSessionBtnContainer">
-                <button onclick="window.location.href = '/app/';">Session finished — back to home</button>
+                <button id="restartSpeakingBtn" onclick="window.restartSpeakingAssessment && window.restartSpeakingAssessment();">Assess again</button>
             </div>
         </div>
     </div>
+    <script src="/app/speaking/restart.js?v=20251022"></script>
 </body>
 </html>

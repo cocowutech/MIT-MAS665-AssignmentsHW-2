@@ -49,10 +49,11 @@ class StartRequest(BaseModel):
     """
     Request model for starting a new listening session.
     
-    Note: start_level is now fixed to A2, no user selection allowed.
-    This ensures consistent baseline assessment across all users.
+    Attributes:
+        start_level: Optional CEFR level override (A1–C2). Defaults to A2 when
+            omitted or invalid to preserve a safe baseline.
     """
-    pass
+    start_level: Optional[str] = Field(default=None, description="Optional starting CEFR level (A1–C2).")
 
 
 class Answer(BaseModel):
@@ -134,15 +135,20 @@ def _validate_cefr(level: Optional[str]) -> str:
     """
     Validate and normalize CEFR level.
     
-    Currently always returns A2 as the starting level for consistency.
-    This ensures all users begin at the same baseline difficulty.
+    Accepts an optional user-provided CEFR level and falls back to A2 if the
+    value is missing or invalid. This allows callers to reuse a learner's latest
+    assessed level while keeping A2 as a safe default.
     
     Args:
-        level: Input CEFR level (ignored, always returns A2)
+        level: Input CEFR level from the request
         
     Returns:
-        str: Always returns "A2"
+        str: Normalized CEFR level string
     """
+    if isinstance(level, str):
+        normalized = level.strip().upper()
+        if normalized in CEFR_ORDER:
+            return normalized
     return "A2"
 
 
@@ -334,13 +340,13 @@ async def start_session(req: StartRequest, user: User = Depends(get_current_user
     Start a new listening assessment session.
     
     This endpoint initializes a new listening session with:
-    - Fixed A2 starting level for consistency
+    - Optional CEFR starting level override (defaults to A2 when absent)
     - Initial batch of 2 listening clips
     - Session state tracking for adaptive difficulty
     - Total of 10 questions across 5 iterations
     
     Args:
-        req: Start request (currently unused, level fixed to A2)
+        req: Start request containing optional starting level
         user: Authenticated user from dependency injection
         
     Returns:
@@ -631,4 +637,3 @@ async def get_state(session_id: str, user: User = Depends(get_current_user)):
         ],
         "finished": state.ended,
     }
-
