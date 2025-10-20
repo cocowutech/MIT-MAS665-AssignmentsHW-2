@@ -12,6 +12,27 @@
    WRITING-SPECIFIC COMPONENTS
    ============================================================================ */
 
+#status {
+    min-height: 20px;
+    margin: 12px 0;
+    color: #cbd5f5;
+    transition: color 0.2s ease;
+}
+
+#status.status-pending {
+    color: #fbbf24;
+}
+
+.session-actions {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.session-actions button {
+    min-width: 160px;
+}
+
 /* Writing prompt */
 .writing-prompt {
     background: #0a0f1f;

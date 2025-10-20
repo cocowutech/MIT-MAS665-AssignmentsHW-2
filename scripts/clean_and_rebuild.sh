@@ -44,14 +44,21 @@ echo "[INFO] Rebuilding TypeScript files..."
 # Compile TypeScript files for each module
 for module in frontend/*/; do
     module_name=$(basename "$module")
-    ts_file="$module/${module_name}.ts"
-    
-    if [ -f "$ts_file" ]; then
-        echo "[INFO] Compiling TypeScript for $module_name module..."
-        cd "$module"
-        npx tsc "${module_name}.ts" --target es2020 --lib es2020,dom --module amd --outFile "$ROOT_DIR/frontend/build/$module_name/${module_name}.js"
-        cd "$ROOT_DIR"
+    shopt -s nullglob
+    ts_files=("$module"/*.ts)
+    shopt -u nullglob
+
+    if [ ${#ts_files[@]} -eq 0 ]; then
+        continue
     fi
+
+    for ts_path in "${ts_files[@]}"; do
+        filename=$(basename "$ts_path" .ts)
+        echo "[INFO] Compiling TypeScript for $module_name/$filename..."
+        cd "$module"
+        npx tsc "${filename}.ts" --target es2020 --lib es2020,dom --module amd --outFile "$ROOT_DIR/frontend/build/$module_name/${filename}.js"
+        cd "$ROOT_DIR"
+    done
 done
 
 # Compile TypeScript files for shared/js directory

@@ -173,6 +173,8 @@ class WritingModuleState {
     public lastEvaluationLevel: string | null = null;
     public lastEvaluationScore: number | null = null;
     public evaluationScores: number[] = [];
+    public lastEvaluation: WritingEvaluation | null = null;
+    public isRestartInProgress: boolean = false;
 
     // UI state
     public isSubmissionInProgress: boolean = false;
@@ -207,7 +209,8 @@ class WritingModuleState {
     /**
      * Reset session state
      */
-    public resetSessionState(): void {
+    public resetSessionState(options?: { preserveRestartFlag?: boolean }): void {
+        const preserveRestartFlag = options?.preserveRestartFlag ?? false;
         this.session = null;
         this.currentPrompt = null;
         this.currentText = '';
@@ -219,6 +222,10 @@ class WritingModuleState {
         this.lastEvaluationLevel = null;
         this.lastEvaluationScore = null;
         this.evaluationScores = [];
+        this.lastEvaluation = null;
+        if (!preserveRestartFlag) {
+            this.isRestartInProgress = false;
+        }
         this.stopPromptTimer();
         this.isSubmissionInProgress = false;
         this.showResults = false;
@@ -295,6 +302,32 @@ function hide(el: string | HTMLElement): void {
     const node = typeof el === 'string' ? APIUtils.$element(el) : el;
     if (!node) return;
     node.classList.add('hidden');
+}
+
+/**
+ * Update the global status message with optional pending styling.
+ * @param message - The message to display
+ * @param pending - Whether the message represents an in-progress state
+ * @param target - Optional specific status element to update
+ */
+function updateStatusMessage(message: string, pending = false, target?: HTMLElement | null): void {
+    const statusEl = target ?? APIUtils.$element('status');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    const shouldShowPending = pending && message.trim().length > 0;
+    if (shouldShowPending) {
+        statusEl.classList.add('status-pending');
+    } else {
+        statusEl.classList.remove('status-pending');
+    }
+}
+
+/**
+ * Clear the global status message.
+ * @param target - Optional specific status element to clear
+ */
+function clearStatusMessage(target?: HTMLElement | null): void {
+    updateStatusMessage('', false, target);
 }
 
 /**
@@ -430,10 +463,11 @@ function normalizeLevel(level: string | null | undefined): string {
 
 function scoreToCefr(score: number): string {
     if (!Number.isFinite(score)) return 'A2';
-    if (score >= 92) return 'C1';
-    if (score >= 84) return 'B2';
-    if (score >= 70) return 'B1';
-    if (score >= 55) return 'A2';
+    if (score >= 96) return 'C2';
+    if (score >= 88) return 'C1';
+    if (score >= 76) return 'B2';
+    if (score >= 64) return 'B1';
+    if (score >= 50) return 'A2';
     return 'A1';
 }
 
@@ -473,9 +507,10 @@ async function login(username: string, password: string): Promise<string> {
  * @returns Session data with first writing task
  * @throws Error if session initialization fails
  */
-async function startSession(): Promise<WritingSessionResponse> {
+async function startSession(overrideLevel?: string): Promise<WritingSessionResponse> {
     try {
-        const startingLevel = await APIUtils.WritingAPI.getDefaultLevel();
+        const normalizedOverride = overrideLevel ? normalizeLevel(overrideLevel) : null;
+        const startingLevel = normalizedOverride ?? await APIUtils.WritingAPI.getDefaultLevel();
         const response = await APIUtils.WritingAPI.startSession(startingLevel);
         moduleState.session = response.session;
         if (moduleState.session) {
@@ -497,7 +532,11 @@ async function startSession(): Promise<WritingSessionResponse> {
         moduleState.sessionStartTime = Date.now();
         moduleState.evaluationScores = [];
         moduleState.lastEvaluationScore = null;
+        moduleState.lastEvaluationLevel = null;
+        moduleState.lastEvaluation = null;
         moduleState.isSessionActive = true;
+        moduleState.showResults = false;
+        moduleState.isRestartInProgress = false;
         return response;
     } catch (error) {
         if (error instanceof Error) {
@@ -526,6 +565,91 @@ async function submitWriting(submission: WritingSubmission): Promise<WritingEval
     } catch (error) {
         throw new Error('Failed to submit writing');
     }
+}
+
+async function submitImageForEvaluation(file: File, text?: string): Promise<WritingEvaluation> {
+    const response = await APIUtils.WritingAPI.submitImage(file, text);
+    return normalizeWritingEvaluation(response.evaluation);
+}
+
+function dedupeSuggestions(...suggestionGroups: Array<string[] | undefined>): string[] | undefined {
+    const merged: string[] = [];
+    for (const group of suggestionGroups) {
+        if (!group) continue;
+        for (const entry of group) {
+            const trimmed = entry.trim();
+            if (trimmed.length > 0) {
+                merged.push(trimmed);
+            }
+        }
+    }
+    if (!merged.length) return undefined;
+    const unique = Array.from(new Set(merged));
+    return unique.length ? unique : undefined;
+}
+
+function pickStrongerBand(primary?: string, secondary?: string): string | undefined {
+    if (!primary && !secondary) return undefined;
+    const order = VALID_LEVELS;
+    const primaryIndex = primary ? order.indexOf(primary.toUpperCase() as typeof order[number]) : -1;
+    const secondaryIndex = secondary ? order.indexOf(secondary.toUpperCase() as typeof order[number]) : -1;
+    if (primaryIndex === -1 && secondaryIndex === -1) return undefined;
+    if (primaryIndex >= secondaryIndex) return primary ?? secondary ?? undefined;
+    return secondary ?? primary ?? undefined;
+}
+
+function mergeWritingEvaluations(primary: WritingEvaluation, secondary: WritingEvaluation): WritingEvaluation {
+    const scoreDelta = Math.abs(primary.score - secondary.score);
+    const correlated = scoreDelta <= 10;
+    const blend = (a: number, b: number): number => {
+        if (!Number.isFinite(a) && Number.isFinite(b)) return b;
+        if (!Number.isFinite(b) && Number.isFinite(a)) return a;
+        if (!Number.isFinite(a) && !Number.isFinite(b)) return 0;
+        if (correlated) {
+            return Math.round(Math.min(100, (a * 0.55) + (b * 0.45)));
+        }
+        return Math.max(a, b);
+    };
+
+    const combinedScore = blend(primary.score, secondary.score);
+    const contentScore = blend(primary.content_score, secondary.content_score);
+    const organizationScore = blend(primary.organization_score, secondary.organization_score);
+    const languageScore = blend(primary.language_score, secondary.language_score);
+
+    const feedbackParts: string[] = [];
+    const primaryFeedback = primary.feedback?.trim();
+    const secondaryFeedback = secondary.feedback?.trim();
+
+    if (primaryFeedback) {
+        feedbackParts.push(primaryFeedback);
+    }
+    if (secondaryFeedback && secondaryFeedback !== primaryFeedback) {
+        const prefix = correlated
+            ? 'We also incorporated your typed edits:'
+            : 'Additional insights from your typed response:';
+        feedbackParts.push(`${prefix} ${secondaryFeedback}`);
+    }
+
+    if (!feedbackParts.length) {
+        feedbackParts.push('Combined analysis reflects both your typed response and uploaded image.');
+    } else {
+        feedbackParts.push('Combined analysis reflects both your typed response and uploaded image.');
+    }
+
+    const combinedSuggestions = dedupeSuggestions(primary.suggestions, secondary.suggestions);
+    const combinedLevelAdjustment = (primary.level_adjustment + secondary.level_adjustment) / 2;
+    const combinedBand = pickStrongerBand(primary.band, secondary.band);
+
+    return {
+        score: Math.min(100, Math.max(0, combinedScore)),
+        content_score: Math.min(100, Math.max(0, contentScore)),
+        organization_score: Math.min(100, Math.max(0, organizationScore)),
+        language_score: Math.min(100, Math.max(0, languageScore)),
+        feedback: feedbackParts.join('\n\n'),
+        suggestions: combinedSuggestions,
+        level_adjustment: combinedLevelAdjustment,
+        band: combinedBand
+    };
 }
 
 /**
@@ -822,14 +946,27 @@ function updateProgress(): void {
  * Display evaluation results
  * @param evaluation - Evaluation result data
  */
-function displayEvaluationResults(evaluation: WritingEvaluation): void {
-    const resultsDiv = APIUtils.$element('results');
-    if (!resultsDiv) return;
-    
-    resultsDiv.innerHTML = `
+function renderEvaluationCard(evaluation: WritingEvaluation, options?: { heading?: string; includeTime?: boolean }): string {
+    const heading = options?.heading ?? 'Writing Evaluation';
+    const includeTime = options?.includeTime ?? true;
+    const timeMarkup = includeTime
+        ? `
+                    <div class="score-item">
+                        <div class="score-label">Time</div>
+                        <div class="score-value">${formatTime(moduleState.getPromptTime())}</div>
+                    </div>`
+        : '';
+
+    const suggestionMarkup = evaluation.suggestions && evaluation.suggestions.length
+        ? `
+                <div class="comment-title" style="margin-top: 12px;">Suggestions</div>
+                <div class="comment-text">${evaluation.suggestions.join('<br>')}</div>`
+        : '';
+
+    return `
         <div class="writing-results">
             <div class="results-header">
-                <h3 class="results-title">Writing Evaluation</h3>
+                <h3 class="results-title">${heading}</h3>
                 <div class="results-score">${evaluation.score}/100</div>
             </div>
             <div class="score-section">
@@ -846,22 +983,23 @@ function displayEvaluationResults(evaluation: WritingEvaluation): void {
                         <div class="score-label">Language</div>
                         <div class="score-value">${evaluation.language_score}/100</div>
                     </div>
-                    <div class="score-item">
-                        <div class="score-label">Time</div>
-                        <div class="score-value">${formatTime(moduleState.getPromptTime())}</div>
-                    </div>
+                    ${timeMarkup}
                 </div>
             </div>
             <div class="comment-box">
                 <div class="comment-title">Feedback</div>
                 <div class="comment-text">${evaluation.feedback}</div>
-                ${evaluation.suggestions ? `
-                    <div class="comment-title" style="margin-top: 12px;">Suggestions</div>
-                    <div class="comment-text">${evaluation.suggestions.join('<br>')}</div>
-                ` : ''}
+                ${suggestionMarkup}
             </div>
         </div>
     `;
+}
+
+function displayEvaluationResults(evaluation: WritingEvaluation): void {
+    const resultsDiv = APIUtils.$element('results');
+    if (!resultsDiv) return;
+    
+    resultsDiv.innerHTML = renderEvaluationCard(evaluation);
     
     show('results');
     moduleState.showResults = true;
@@ -871,11 +1009,31 @@ function displayEvaluationResults(evaluation: WritingEvaluation): void {
  * Show session completion screen
  * @param finalScore - Final session score
  */
-function showSessionComplete(finalScore: number): void {
+function showSessionComplete(finalScore: number, finalEvaluation?: WritingEvaluation | null): void {
     const resultsDiv = APIUtils.$element('results');
     if (!resultsDiv) return;
     
     const sessionTime = Date.now() - moduleState.sessionStartTime;
+    const recordedScores = moduleState.evaluationScores.length
+        ? moduleState.evaluationScores
+        : (finalEvaluation ? [finalEvaluation.score] : []);
+    const averageScoreRaw = recordedScores.length
+        ? recordedScores.reduce((sum, score) => sum + score, 0) / recordedScores.length
+        : finalScore;
+    const averageScore = Math.max(0, Math.min(100, Math.round(averageScoreRaw)));
+    const finalCefrLevel = scoreToCefr(averageScore);
+    const finalScoreDisplay = `${finalCefrLevel} (${averageScore}/100)`;
+
+    moduleState.lastEvaluationLevel = finalCefrLevel;
+    if (moduleState.session) {
+        moduleState.session.current_level = finalCefrLevel;
+        moduleState.session.target_cefr = finalCefrLevel;
+    }
+
+    const evaluationHtml = finalEvaluation
+        ? renderEvaluationCard(finalEvaluation, { heading: 'Final Prompt Feedback', includeTime: true })
+        : '';
+    const restartLevel = finalCefrLevel || 'A2';
     
     resultsDiv.innerHTML = `
         <div class="session-summary">
@@ -883,7 +1041,7 @@ function showSessionComplete(finalScore: number): void {
             <div class="summary-stats">
                 <div class="summary-stat">
                     <div class="summary-stat-label">Final Score</div>
-                    <div class="summary-stat-value">${finalScore}/100</div>
+                    <div class="summary-stat-value">${finalScoreDisplay}</div>
                 </div>
                 <div class="summary-stat">
                     <div class="summary-stat-label">Prompts</div>
@@ -895,7 +1053,7 @@ function showSessionComplete(finalScore: number): void {
                 </div>
                 <div class="summary-stat">
                     <div class="summary-stat-label">Final Level</div>
-                    <div class="summary-stat-value">${moduleState.session?.current_level || 'N/A'}</div>
+                    <div class="summary-stat-value">${finalCefrLevel}</div>
                 </div>
             </div>
             <div class="comment-box">
@@ -907,11 +1065,20 @@ function showSessionComplete(finalScore: number): void {
                 </div>
             </div>
         </div>
+        ${evaluationHtml}
+        <div class="session-actions">
+            <button type="button" id="restartWritingBtn" data-level="${restartLevel}">Assess again</button>
+        </div>
     `;
     
     show('results');
     moduleState.showResults = true;
     moduleState.isSessionActive = false;
+
+    const restartBtn = document.getElementById('restartWritingBtn') as HTMLButtonElement | null;
+    if (restartBtn) {
+        restartBtn.addEventListener('click', () => restartWritingAssessment(restartBtn.dataset.level || undefined));
+    }
 }
 
 // ============================================================================
@@ -939,6 +1106,9 @@ async function handleSubmitWriting(): Promise<void> {
     const submitBtn = APIUtils.$element('submitBtn');
     const submitCard = APIUtils.$element('submitCard');
     const status = APIUtils.$element('status');
+    const setPendingMessage = (message: string): void => updateStatusMessage(message, true, status);
+    const setResolvedMessage = (message: string): void => updateStatusMessage(message, false, status);
+    const clearResolvedMessage = (): void => clearStatusMessage(status);
     if (submitBtn) {
         submitBtn.textContent = 'Submitting...';
         (submitBtn as HTMLButtonElement).disabled = true;
@@ -946,28 +1116,58 @@ async function handleSubmitWriting(): Promise<void> {
     if (submitCard) {
         hide(submitCard);
     }
+
+    const evaluationContext = hasImage && hasText
+        ? 'combined'
+        : hasImage
+            ? 'image'
+            : 'text';
+    switch (evaluationContext) {
+        case 'combined':
+            setPendingMessage('Evaluating your text and image together...');
+            break;
+        case 'image':
+            setPendingMessage('Evaluating image submission...');
+            break;
+        default:
+            setPendingMessage('Scoring your writing...');
+            break;
+    }
     
     moduleState.isSubmissionInProgress = true;
     
     try {
         let evaluation: WritingEvaluation | null = null;
         let imageWarning: string | null = null;
+        let combinedEvaluationUsed = false;
+        const textSubmission: WritingSubmission | null = hasText ? {
+            prompt_id: moduleState.currentPrompt.id,
+            text: trimmedText,
+            word_count: moduleState.getWordCount(),
+            time_taken: moduleState.getPromptTime()
+        } : null;
 
         if (hasImage && moduleState.currentImageFile) {
             try {
-                const imageResponse = await APIUtils.WritingAPI.submitImage(
-                    moduleState.currentImageFile,
-                    hasText ? trimmedText : undefined
-                );
-                evaluation = normalizeWritingEvaluation(imageResponse.evaluation);
+                if (hasText && textSubmission) {
+                    const [imageEval, textEval] = await Promise.all([
+                        submitImageForEvaluation(moduleState.currentImageFile, trimmedText),
+                        submitWriting(textSubmission)
+                    ]);
+                    evaluation = mergeWritingEvaluations(imageEval, textEval);
+                    combinedEvaluationUsed = true;
+                } else {
+                    evaluation = await submitImageForEvaluation(moduleState.currentImageFile);
+                }
             } catch (imageError) {
                 console.warn('Image submission failed; falling back to text', imageError);
                 if (hasText) {
                     imageWarning = 'We could not read the image clearly, so your typed response was evaluated instead.';
+                    setPendingMessage('Scoring your writing...');
                 } else {
                     const message = 'We could not read the uploaded image. Please try again with a clearer photo or type your response.';
                     if (status) {
-                        status.textContent = message;
+                        setResolvedMessage(message);
                     } else {
                         alert(message);
                     }
@@ -978,13 +1178,10 @@ async function handleSubmitWriting(): Promise<void> {
         }
 
         if (!evaluation) {
-            const submission: WritingSubmission = {
-                prompt_id: moduleState.currentPrompt.id,
-                text: trimmedText,
-                word_count: moduleState.getWordCount(),
-                time_taken: moduleState.getPromptTime()
-            };
-            evaluation = await submitWriting(submission);
+            if (textSubmission) {
+                setPendingMessage('Scoring your writing...');
+                evaluation = await submitWriting(textSubmission);
+            }
         }
 
         if (!evaluation) {
@@ -993,12 +1190,14 @@ async function handleSubmitWriting(): Promise<void> {
 
         if (imageWarning) {
             if (status) {
-                status.textContent = imageWarning;
+                setResolvedMessage(imageWarning);
             } else {
                 alert(imageWarning);
             }
-        } else if (status) {
-            status.textContent = '';
+        } else if (combinedEvaluationUsed) {
+            setResolvedMessage('Combined analysis complete.');
+        } else {
+            clearResolvedMessage();
         }
 
         moduleState.stopPromptTimer();
@@ -1014,6 +1213,7 @@ async function handleSubmitWriting(): Promise<void> {
 
         moduleState.lastEvaluationScore = evaluation.score;
         moduleState.evaluationScores.push(evaluation.score);
+        moduleState.lastEvaluation = evaluation;
 
         const nextLevel = normalizeLevel(evaluation.band ?? scoreToCefr(evaluation.score));
         moduleState.lastEvaluationLevel = nextLevel;
@@ -1030,7 +1230,7 @@ async function handleSubmitWriting(): Promise<void> {
 
         if (sessionComplete) {
             const finalScore = getSessionAverageScore();
-            showSessionComplete(finalScore);
+            showSessionComplete(finalScore, evaluation);
             const continueCard = APIUtils.$element('continueCard');
             if (continueCard) {
                 hide(continueCard);
@@ -1057,11 +1257,13 @@ async function handleSubmitWriting(): Promise<void> {
 
     } catch (error) {
         console.error('Submission failed:', error);
+        const errorMessage = error instanceof Error && error.message
+            ? error.message
+            : 'Submission failed. Please try again.';
         if (status) {
-            const errorMessage = error instanceof Error && error.message
-                ? error.message
-                : 'Submission failed. Please try again.';
-            status.textContent = errorMessage;
+            setResolvedMessage(errorMessage);
+        } else {
+            alert(errorMessage);
         }
         
         if (submitBtn) {
@@ -1094,7 +1296,7 @@ async function continueToNext(): Promise<void> {
         if (continueCard) {
             hide(continueCard);
         }
-        showSessionComplete(getSessionAverageScore());
+        showSessionComplete(getSessionAverageScore(), moduleState.lastEvaluation);
         return;
     }
 
@@ -1107,7 +1309,7 @@ async function continueToNext(): Promise<void> {
         const nextResponse = await getNextPrompt();
 
         if (nextResponse.finished) {
-            showSessionComplete(nextResponse.final_score || 0);
+            showSessionComplete(nextResponse.final_score || 0, moduleState.lastEvaluation);
             if (continueCard) {
                 hide(continueCard);
             }
@@ -1138,7 +1340,9 @@ async function continueToNext(): Promise<void> {
     } catch (error) {
         console.error('Failed to get next prompt:', error);
         const status = APIUtils.$element('status');
-        if (status) status.textContent = 'Failed to load next prompt. Please try again.';
+        if (status) {
+            updateStatusMessage('Failed to load next prompt. Please try again.', false, status);
+        }
         
         if (continueBtn) {
             continueBtn.textContent = 'Next Prompt →';
@@ -1146,6 +1350,110 @@ async function continueToNext(): Promise<void> {
         }
         if (continueCard) {
             show('continueCard');
+        }
+    }
+}
+
+interface BeginAssessmentOptions {
+    skipStartButtonHandling?: boolean;
+}
+
+async function beginAssessment(level?: string, options: BeginAssessmentOptions = {}): Promise<void> {
+    const { skipStartButtonHandling = false } = options;
+    const startBtn = APIUtils.$element('startBtn');
+    const status = APIUtils.$element('status');
+
+    if (moduleState.isSubmissionInProgress || moduleState.isRestartInProgress) {
+        return;
+    }
+
+    if (!skipStartButtonHandling && startBtn) {
+        startBtn.textContent = 'Starting...';
+        (startBtn as HTMLButtonElement).disabled = true;
+    }
+
+    try {
+        moduleState.resetSessionState({ preserveRestartFlag: moduleState.isRestartInProgress });
+        moduleState.stopPromptTimer();
+        hideTimerCard();
+        const response = await startSession(level);
+
+        hide('results');
+        hide('continueCard');
+        hide('startBtn');
+        show('assessment-interface');
+
+        if (response.session.current_prompt) {
+            displayPrompt(response.session.current_prompt);
+            displayEditor();
+        } else {
+            moduleState.currentPrompt = null;
+        }
+
+        moduleState.currentText = '';
+        moduleState.currentImageFile = null;
+        moduleState.showResults = false;
+
+        const submitBtn = APIUtils.$element('submitBtn');
+        if (submitBtn) {
+            submitBtn.textContent = 'Submit Writing';
+            (submitBtn as HTMLButtonElement).disabled = false;
+        }
+        const submitCard = APIUtils.$element('submitCard');
+        if (submitCard) {
+            show(submitCard);
+        }
+
+        updateProgress();
+        clearStatusMessage(status);
+    } catch (error) {
+        console.error('Start session failed:', error);
+        const message = error instanceof Error
+            ? (error.message || 'Failed to start session. Please try again.')
+            : 'Failed to start session. Please try again.';
+        updateStatusMessage(message, false, status);
+
+        if (!skipStartButtonHandling && startBtn) {
+            startBtn.textContent = 'Start Writing Assessment';
+            (startBtn as HTMLButtonElement).disabled = false;
+        }
+        throw error;
+    } finally {
+        if (!skipStartButtonHandling && startBtn) {
+            (startBtn as HTMLButtonElement).disabled = false;
+        }
+    }
+}
+
+async function restartWritingAssessment(level?: string): Promise<void> {
+    if (moduleState.isSubmissionInProgress || moduleState.isRestartInProgress) {
+        return;
+    }
+
+    const status = APIUtils.$element('status');
+    const targetLevel = normalizeLevel(level || moduleState.lastEvaluationLevel || moduleState.session?.current_level || 'A2');
+    const restartBtn = document.getElementById('restartWritingBtn') as HTMLButtonElement | null;
+
+    moduleState.isRestartInProgress = true;
+    if (restartBtn) {
+        restartBtn.disabled = true;
+        restartBtn.textContent = 'Starting...';
+    }
+    updateStatusMessage(`Restarting at CEFR ${targetLevel}...`, true, status);
+
+    try {
+        await beginAssessment(targetLevel, { skipStartButtonHandling: true });
+        updateStatusMessage(`Restarted at CEFR ${targetLevel}.`, false, status);
+    } catch (error) {
+        const message = error instanceof Error && error.message
+            ? error.message
+            : 'Failed to restart assessment. Please try again.';
+        updateStatusMessage(message, false, status);
+    } finally {
+        moduleState.isRestartInProgress = false;
+        if (restartBtn) {
+            restartBtn.disabled = false;
+            restartBtn.textContent = 'Assess again';
         }
     }
 }
@@ -1168,7 +1476,7 @@ async function handleLogin(event: Event): Promise<void> {
     const password = passwordInput.value;
 
     if (!username || !password) {
-        if (status) status.textContent = 'Please enter both username and password.';
+        if (status) updateStatusMessage('Please enter both username and password.', false, status);
         return;
     }
 
@@ -1177,9 +1485,9 @@ async function handleLogin(event: Event): Promise<void> {
 
     try {
         await login(username, password);
-        if (status) status.textContent = 'Login successful!';
+        if (status) updateStatusMessage('Login successful!', false, status);
     } catch (error) {
-        if (status) status.textContent = 'Login failed. Please try again.';
+        if (status) updateStatusMessage('Login failed. Please try again.', false, status);
         if (loginMsg) loginMsg.textContent = 'Login failed';
     } finally {
         if (submitBtn) submitBtn.disabled = false;
@@ -1190,43 +1498,10 @@ async function handleLogin(event: Event): Promise<void> {
  * Handle start session button click
  */
 async function handleStartSession(): Promise<void> {
-    const startBtn = APIUtils.$element('startBtn');
-    if (startBtn) {
-        startBtn.textContent = 'Starting...';
-        (startBtn as HTMLButtonElement).disabled = true;
-    }
-    
     try {
-        const response = await startSession();
-        
-        // Hide start button and show assessment interface
-        hide('startBtn');
-        show('assessment-interface');
-        
-        // Display first prompt and editor
-        if (response.session.current_prompt) {
-            displayPrompt(response.session.current_prompt);
-            displayEditor();
-        }
-        
-        // Update progress
-        updateProgress();
-        
-    } catch (error) {
-        console.error('Start session failed:', error);
-        const status = APIUtils.$element('status');
-        if (status) {
-            if (error instanceof Error) {
-                status.textContent = error.message || 'Failed to start session. Please try again.';
-            } else {
-                status.textContent = 'Failed to start session. Please try again.';
-            }
-        }
-        
-        if (startBtn) {
-            startBtn.textContent = 'Start Writing Assessment';
-            (startBtn as HTMLButtonElement).disabled = false;
-        }
+        await beginAssessment();
+    } catch {
+        // beginAssessment already handles error messaging
     }
 }
 
@@ -1282,6 +1557,8 @@ async function initializeWritingModule(): Promise<void> {
     handleStartSession,
     handleSubmitWriting,
     continueToNext,
+    beginAssessment,
+    restartWritingAssessment,
     updateWordCount,
     displayPrompt,
     displayEditor,
