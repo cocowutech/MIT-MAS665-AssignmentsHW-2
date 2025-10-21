@@ -175,6 +175,7 @@ class WritingModuleState {
     public evaluationScores: number[] = [];
     public lastEvaluation: WritingEvaluation | null = null;
     public isRestartInProgress: boolean = false;
+    public nextStartLevel: string | null = null;
 
     // UI state
     public isSubmissionInProgress: boolean = false;
@@ -209,8 +210,9 @@ class WritingModuleState {
     /**
      * Reset session state
      */
-    public resetSessionState(options?: { preserveRestartFlag?: boolean }): void {
+    public resetSessionState(options?: { preserveRestartFlag?: boolean; preserveNextStartLevel?: boolean }): void {
         const preserveRestartFlag = options?.preserveRestartFlag ?? false;
+        const preserveNextStartLevel = options?.preserveNextStartLevel ?? false;
         this.session = null;
         this.currentPrompt = null;
         this.currentText = '';
@@ -225,6 +227,9 @@ class WritingModuleState {
         this.lastEvaluation = null;
         if (!preserveRestartFlag) {
             this.isRestartInProgress = false;
+        }
+        if (!preserveNextStartLevel) {
+            this.nextStartLevel = null;
         }
         this.stopPromptTimer();
         this.isSubmissionInProgress = false;
@@ -510,7 +515,12 @@ async function login(username: string, password: string): Promise<string> {
 async function startSession(overrideLevel?: string): Promise<WritingSessionResponse> {
     try {
         const normalizedOverride = overrideLevel ? normalizeLevel(overrideLevel) : null;
-        const startingLevel = normalizedOverride ?? await APIUtils.WritingAPI.getDefaultLevel();
+        const queuedLevel = !normalizedOverride && moduleState.nextStartLevel
+            ? normalizeLevel(moduleState.nextStartLevel)
+            : null;
+        const startingLevel = normalizedOverride
+            ? normalizedOverride
+            : (queuedLevel ?? await APIUtils.WritingAPI.getDefaultLevel());
         const response = await APIUtils.WritingAPI.startSession(startingLevel);
         moduleState.session = response.session;
         if (moduleState.session) {
@@ -518,8 +528,15 @@ async function startSession(overrideLevel?: string): Promise<WritingSessionRespo
             moduleState.session.total = totalTasks;
             moduleState.session.asked = 0;
             moduleState.session.remaining = totalTasks;
-            moduleState.session.current_level = normalizeLevel(moduleState.session.current_level || startingLevel);
-            moduleState.session.target_cefr = normalizeLevel(moduleState.session.target_cefr || startingLevel);
+            const shouldForceLevel = Boolean(normalizedOverride || queuedLevel);
+            const effectiveLevel = shouldForceLevel
+                ? startingLevel
+                : normalizeLevel(moduleState.session.current_level || startingLevel);
+            const effectiveTarget = shouldForceLevel
+                ? startingLevel
+                : normalizeLevel(moduleState.session.target_cefr || startingLevel);
+            moduleState.session.current_level = effectiveLevel;
+            moduleState.session.target_cefr = effectiveTarget;
             moduleState.currentPrompt = moduleState.session.current_prompt;
             if (response.session) {
                 response.session.total = moduleState.session.total;
@@ -537,6 +554,7 @@ async function startSession(overrideLevel?: string): Promise<WritingSessionRespo
         moduleState.isSessionActive = true;
         moduleState.showResults = false;
         moduleState.isRestartInProgress = false;
+        moduleState.nextStartLevel = null;
         return response;
     } catch (error) {
         if (error instanceof Error) {
@@ -1029,6 +1047,7 @@ function showSessionComplete(finalScore: number, finalEvaluation?: WritingEvalua
         moduleState.session.current_level = finalCefrLevel;
         moduleState.session.target_cefr = finalCefrLevel;
     }
+    moduleState.nextStartLevel = finalCefrLevel;
 
     const evaluationHtml = finalEvaluation
         ? renderEvaluationCard(finalEvaluation, { heading: 'Final Prompt Feedback', includeTime: true })
@@ -1066,18 +1085,19 @@ function showSessionComplete(finalScore: number, finalEvaluation?: WritingEvalua
             </div>
         </div>
         ${evaluationHtml}
-        <div class="session-actions">
-            <button type="button" id="restartWritingBtn" data-level="${restartLevel}">Assess again</button>
-        </div>
     `;
     
     show('results');
     moduleState.showResults = true;
     moduleState.isSessionActive = false;
 
-    const restartBtn = document.getElementById('restartWritingBtn') as HTMLButtonElement | null;
-    if (restartBtn) {
-        restartBtn.addEventListener('click', () => restartWritingAssessment(restartBtn.dataset.level || undefined));
+    const restartCard = APIUtils.$element('restartCard');
+    const restartBtn = APIUtils.$element('restartAssessmentBtn') as HTMLButtonElement | null;
+    if (restartCard && restartBtn) {
+        restartBtn.dataset.level = restartLevel;
+        restartBtn.textContent = `Assess again at ${finalCefrLevel}`;
+        restartBtn.disabled = false;
+        show(restartCard);
     }
 }
 
@@ -1265,6 +1285,13 @@ async function handleSubmitWriting(): Promise<void> {
         } else {
             alert(errorMessage);
         }
+
+        const resultsDiv = APIUtils.$element('results');
+        if (resultsDiv) {
+            resultsDiv.innerHTML = '';
+            hide(resultsDiv);
+        }
+        moduleState.showResults = false;
         
         if (submitBtn) {
             submitBtn.textContent = 'Submit Writing';
@@ -1363,7 +1390,7 @@ async function beginAssessment(level?: string, options: BeginAssessmentOptions =
     const startBtn = APIUtils.$element('startBtn');
     const status = APIUtils.$element('status');
 
-    if (moduleState.isSubmissionInProgress || moduleState.isRestartInProgress) {
+    if (moduleState.isSubmissionInProgress) {
         return;
     }
 
@@ -1373,13 +1400,32 @@ async function beginAssessment(level?: string, options: BeginAssessmentOptions =
     }
 
     try {
-        moduleState.resetSessionState({ preserveRestartFlag: moduleState.isRestartInProgress });
+        moduleState.resetSessionState({
+            preserveRestartFlag: moduleState.isRestartInProgress,
+            preserveNextStartLevel: moduleState.isRestartInProgress
+        });
         moduleState.stopPromptTimer();
         hideTimerCard();
-        const response = await startSession(level);
 
         hide('results');
         hide('continueCard');
+        hide('restartCard');
+        hide('progress');
+        const progressDiv = APIUtils.$element('progress');
+        if (progressDiv) {
+            progressDiv.innerHTML = '';
+        }
+        const promptDiv = APIUtils.$element('prompt');
+        if (promptDiv) {
+            promptDiv.innerHTML = '';
+        }
+        const editorDiv = APIUtils.$element('editor');
+        if (editorDiv) {
+            editorDiv.innerHTML = '';
+        }
+
+        const response = await startSession(level);
+
         hide('startBtn');
         show('assessment-interface');
 
@@ -1393,6 +1439,11 @@ async function beginAssessment(level?: string, options: BeginAssessmentOptions =
         moduleState.currentText = '';
         moduleState.currentImageFile = null;
         moduleState.showResults = false;
+
+        if (moduleState.session) {
+            moduleState.session.asked = 0;
+            moduleState.session.remaining = moduleState.session.total ?? TOTAL_WRITING_TASKS;
+        }
 
         const submitBtn = APIUtils.$element('submitBtn');
         if (submitBtn) {
@@ -1432,9 +1483,10 @@ async function restartWritingAssessment(level?: string): Promise<void> {
 
     const status = APIUtils.$element('status');
     const targetLevel = normalizeLevel(level || moduleState.lastEvaluationLevel || moduleState.session?.current_level || 'A2');
-    const restartBtn = document.getElementById('restartWritingBtn') as HTMLButtonElement | null;
+    const restartBtn = APIUtils.$element('restartAssessmentBtn') as HTMLButtonElement | null;
 
     moduleState.isRestartInProgress = true;
+    moduleState.nextStartLevel = targetLevel;
     if (restartBtn) {
         restartBtn.disabled = true;
         restartBtn.textContent = 'Starting...';
@@ -1453,7 +1505,7 @@ async function restartWritingAssessment(level?: string): Promise<void> {
         moduleState.isRestartInProgress = false;
         if (restartBtn) {
             restartBtn.disabled = false;
-            restartBtn.textContent = 'Assess again';
+            restartBtn.textContent = `Assess again at ${targetLevel}`;
         }
     }
 }
@@ -1535,6 +1587,11 @@ async function initializeWritingModule(): Promise<void> {
     const continueBtn = APIUtils.$element('continueBtn');
     if (continueBtn) {
         continueBtn.addEventListener('click', continueToNext);
+    }
+    
+    const restartBtn = APIUtils.$element('restartAssessmentBtn');
+    if (restartBtn) {
+        restartBtn.addEventListener('click', () => restartWritingAssessment(restartBtn.dataset.level || undefined));
     }
     
     // Authentication state is managed by AuthUtils.updateUIForAuthStatus()
