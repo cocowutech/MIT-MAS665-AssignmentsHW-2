@@ -100,20 +100,35 @@ Create a `.env` file in the root of the project directory by copying the example
 # --- .env file ---
 
 # Required: Gemini API Configuration
-GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+GEMINI_API_KEY=replace-with-your-gemini-api-key
 GEMINI_MODEL=gemini-2.5-flash
 
 # Provider: Choose ONE ("vertex" or "ai_studio")
-GEMINI_PROVIDER=vertex
+GEMINI_PROVIDER=ai_studio
 
 # Vertex AI Settings (only required if GEMINI_PROVIDER=vertex)
 GEMINI_VERTEX_REGION=us-central1
 GEMINI_VERTEX_PROJECT=your-gcp-project-id
 
+# Optional: module-specific overrides
+# GEMINI_MODEL_LISTEN=
+
+# Optional: OpenRouter fallback configuration
+OPENROUTER_API_KEY=replace-with-your-openrouter-key
+OPENROUTER_MODEL=z-ai/glm-4.6
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1/chat/completions
+OPENROUTER_HTTP_REFERER=https://localhost
+OPENROUTER_TITLE=AdaptiveEnglishPlacement
+
 # Auth (seed user and JWT)
-SEED_USERNAME=guest
-SEED_PASSWORD=guest
+SEED_USERNAME=rong_wu
+SEED_PASSWORD=mit!23456
 JWT_SECRET_KEY=change-this-in-prod
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=120
+
+# Database (optional, defaults to SQLite)
+# DATABASE_URL=
 ```
 
 **Note**: Make sure to replace placeholder values (`YOUR_GEMINI_API_KEY`, `your-gcp-project-id`, etc.) with your actual credentials.
