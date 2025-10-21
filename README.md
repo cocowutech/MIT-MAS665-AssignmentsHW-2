@@ -34,34 +34,65 @@ The application features a FastAPI backend, a lightweight vanilla JavaScript fro
 
 ### Prerequisites
 
-Ensure you have the following installed on your system (instructions provided for Ubuntu/Debian):
+-   Developed and tested on Ubuntu/Debian. On other Linux distributions install the equivalent system packages.
+-   Ability to install packages with `apt-get` (the setup script will prompt for sudo if needed).
 
--   **Python 3.12**
--   **Python Virtual Environment**:
-    ```bash
-    sudo apt-get update && sudo apt-get install -y python3-venv
-    ```
--   **Tesseract OCR Engine** (required for the image-to-text feature in the Writing module):
-    ```bash
-    sudo apt-get install -y tesseract-ocr
-    ```
-
-### 1. Clone & Set Up the Environment
+If you prefer to install system packages manually, ensure the following baseline tools are present:
 
 ```bash
-# Navigate to your desired project directory
-# git clone <your-repo-url>
-# cd MIT-MAS665-AssignmentsHW-2
-
-# Create and activate a Python virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install the required Python packages
-pip install -r requirements.txt
+sudo apt-get update
+sudo apt-get install -y \
+    python3 python3-pip python3-venv python3-dev \
+    build-essential libffi-dev libssl-dev pkg-config \
+    curl tesseract-ocr
 ```
 
-### 2. Configure Environment Variables
+### 1. Clone the Project
+
+```bash
+# Navigate to the directory where you want the project to live
+# git clone <your-repo-url>
+# cd MIT-MAS665-AssignmentsHW-2
+```
+
+### 2. Install Dependencies (Recommended)
+
+Run the automated installer from the project root:
+
+```bash
+./scripts/install_dependencies.sh
+```
+
+The script performs the following:
+
+-   Installs required system packages on Debian/Ubuntu (Python toolchain, build essentials, libffi/libssl, curl, tesseract).
+-   Installs Node.js 22.x from NodeSource if Node is not already present.
+-   Creates a Python virtual environment in `.venv` and installs `requirements.txt`.
+-   Runs `npm install` for each frontend module and compiles TypeScript sources.
+
+You can rerun the script at any time; it only installs missing components.  
+If your environment cannot use the script, replicate the same steps manually before proceeding.
+
+**Manual alternative (outline)**
+
+Ensure Node.js (version 20 or newer) and `npm` are available before running the manual commands below.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+for module in frontend/*/; do
+    if [ -f "$module/package.json" ]; then
+        (cd "$module" && npm install)
+    fi
+done
+
+./scripts/clean_and_rebuild.sh
+```
+
+### 3. Configure Environment Variables
 
 Create a `.env` file in the root of the project directory by copying the example below.
 
@@ -87,7 +118,9 @@ JWT_SECRET_KEY=change-this-in-prod
 
 **Note**: Make sure to replace placeholder values (`YOUR_GEMINI_API_KEY`, `your-gcp-project-id`, etc.) with your actual credentials.
 
-### 3. Running the Application
+If you rely on Google Cloud Speech-to-Text, also ensure `GOOGLE_APPLICATION_CREDENTIALS` points to a valid service account JSON file, or export the path before launching the app.
+
+### 4. Run the Application
 
 You can run the server using the provided shell script.
 
@@ -97,6 +130,8 @@ You can run the server using the provided shell script.
 ./scripts/run.sh
 ```
 
+This script activates `.venv`, loads the `.env` file if present, builds missing frontend assets, and starts `uvicorn` with live reload.
+
 **To run as a background process:**
 
 ```bash
@@ -104,6 +139,14 @@ You can run the server using the provided shell script.
 ```
 
 The application will be available at `http://127.0.0.1:8000`.
+
+If you want a single command that installs dependencies, rebuilds the frontend, and launches the app, use:
+
+```bash
+./scripts/run_all.sh
+```
+
+This wrapper will prompt for your sudo password when system packages need to be installed.
 
 ## 🌐 Accessing the Application
 
@@ -132,6 +175,7 @@ The application is built around a modular FastAPI backend that serves a static f
 
 ## Troubleshooting
 
+-   **Installer cannot install system packages**: When `./scripts/install_dependencies.sh` reports missing apt privileges, manually install the listed packages (for example, `sudo apt-get install -y python3 python3-pip python3-venv python3-dev build-essential libffi-dev libssl-dev pkg-config curl tesseract-ocr`) and rerun the script.
 -   **`gemini_configured: false` on `/`**: This means the server could not load the Gemini API key from the `.env` file. Ensure the `.env` file exists in the project root and that you started the server from the root directory.
 -   **401 Unauthorized from Gemini API**:
     -   If using **AI Studio**, ensure `GEMINI_PROVIDER` is set to `ai_studio` and you are using a valid AI Studio key.

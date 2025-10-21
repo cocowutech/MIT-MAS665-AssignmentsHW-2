@@ -2,6 +2,21 @@
 
 # Exit immediately if a command exits with a non-zero status.
 set -e
+set -o pipefail
+
+run_apt() {
+	if ! command -v apt-get >/dev/null 2>&1; then
+		return 1
+	fi
+
+	if [ "$(id -u)" -eq 0 ]; then
+		apt-get "$@"
+	elif command -v sudo >/dev/null 2>&1; then
+		sudo apt-get "$@"
+	else
+		return 1
+	fi
+}
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -11,39 +26,55 @@ echo "[INFO] Starting dependency installation for Debian/Ubuntu..."
 
 # 1. Update package lists
 echo "[INFO] Updating apt package lists..."
-if sudo -n true 2>/dev/null; then
-    sudo apt-get update
+if run_apt update; then
+	echo "[INFO] apt package lists updated"
 else
-    echo "[WARNING] Cannot update package lists without sudo privileges. Continuing with existing packages..."
+	echo "[WARNING] Could not update apt package lists automatically. Proceeding with existing package metadata..."
 fi
 
 # 2. Install system-level prerequisites
-echo "[INFO] Installing python3-venv, tesseract-ocr..."
+REQUIRED_PACKAGES=(
+	python3
+	python3-pip
+	python3-venv
+	python3-dev
+	build-essential
+	libffi-dev
+	libssl-dev
+	pkg-config
+	curl
+	tesseract-ocr
+)
 
-# Check and install Python venv if not available
-if ! python3 -m venv --help >/dev/null 2>&1; then
-    echo "[INFO] Installing python3-venv..."
-    if sudo -n true 2>/dev/null; then
-        sudo apt-get install -y python3-venv
-    else
-        echo "[ERROR] Cannot install python3-venv without sudo privileges. Please install it manually."
-        exit 1
-    fi
+MISSING_PACKAGES=()
+for pkg in "${REQUIRED_PACKAGES[@]}"; do
+	if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+		MISSING_PACKAGES+=("$pkg")
+	fi
+done
+
+if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+	echo "[INFO] Installing required system packages: ${MISSING_PACKAGES[*]}"
+	if ! run_apt install -y "${MISSING_PACKAGES[@]}"; then
+		echo "[ERROR] Failed to install required system packages automatically."
+		echo "[ERROR] Please install them manually, for example:"
+		echo "        sudo apt-get install -y ${MISSING_PACKAGES[*]}"
+		exit 1
+	fi
 else
-    echo "[INFO] python3-venv is already installed"
+	echo "[INFO] All required system packages are already installed."
 fi
 
-# Check and install Tesseract if not available
-if ! command -v tesseract &> /dev/null; then
-    echo "[INFO] Installing tesseract-ocr..."
-    if sudo -n true 2>/dev/null; then
-        sudo apt-get install -y tesseract-ocr
-    else
-        echo "[ERROR] Cannot install tesseract-ocr without sudo privileges. Please install it manually."
-        exit 1
-    fi
-else
-    echo "[INFO] tesseract-ocr is already installed: $(tesseract --version | head -n 1)"
+if ! command -v tesseract >/dev/null 2>&1; then
+	echo "[ERROR] tesseract-ocr is required but not detected on PATH after installation."
+	echo "[ERROR] Verify the package was installed correctly (e.g., sudo apt-get install -y tesseract-ocr)."
+	exit 1
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+	echo "[ERROR] curl is required for downloading Node.js setup scripts."
+	echo "[ERROR] Ensure curl is installed and re-run this script."
+	exit 1
 fi
 
 # Check if Node.js is already installed (via nvm or system)
@@ -52,15 +83,18 @@ if command -v node &> /dev/null; then
     echo "[INFO] npm version: $(npm --version)"
 else
     echo "[INFO] Installing Node.js from NodeSource..."
-    if sudo -n true 2>/dev/null; then
+    if [ "$(id -u)" -eq 0 ]; then
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+        apt-get install -y nodejs
+    elif command -v sudo >/dev/null 2>&1; then
         curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
         sudo apt-get install -y nodejs
-        echo "[INFO] Node.js installed: $(node --version)"
-        echo "[INFO] npm version: $(npm --version)"
     else
-        echo "[ERROR] Cannot install Node.js without sudo privileges. Please install it manually."
+        echo "[ERROR] Installing Node.js requires root privileges. Install Node.js 20+ manually and re-run this script."
         exit 1
     fi
+    echo "[INFO] Node.js installed: $(node --version)"
+    echo "[INFO] npm version: $(npm --version)"
 fi
 
 # 3. Create and activate a Python virtual environment
@@ -83,11 +117,12 @@ echo "[INFO] Installing frontend dependencies..."
 # Install TypeScript globally for compilation
 if ! command -v tsc &> /dev/null; then
     echo "[INFO] Installing TypeScript globally..."
-    if sudo -n true 2>/dev/null; then
-        npm install -g typescript
+    if npm install -g typescript; then
+        echo "[INFO] TypeScript installed globally."
+    elif command -v sudo >/dev/null 2>&1 && sudo npm install -g typescript; then
+        echo "[INFO] TypeScript installed globally with sudo."
     else
-        echo "[WARNING] Cannot install TypeScript globally without sudo privileges."
-        echo "[INFO] TypeScript will be installed locally in each module that needs it."
+        echo "[WARNING] Cannot install TypeScript globally. It will be installed locally where required."
     fi
 else
     echo "[INFO] TypeScript is already installed: $(tsc --version)"
