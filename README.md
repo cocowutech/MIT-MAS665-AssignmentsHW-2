@@ -120,6 +120,19 @@ JWT_SECRET_KEY=change-this-in-prod
 
 If you rely on Google Cloud Speech-to-Text, also ensure `GOOGLE_APPLICATION_CREDENTIALS` points to a valid service account JSON file, or export the path before launching the app.
 
+**Environment variable reference**
+-   `GEMINI_API_KEY`: Primary Gemini API key; required when `GEMINI_PROVIDER` is set to either `ai_studio` or `vertex`.
+-   `GEMINI_MODEL`: Default Gemini model (repository `.env` ships with `gemini-2.5-flash`; adjust for your account).
+-   `GEMINI_PROVIDER`: Set to `ai_studio` (default in the provided `.env`) for AI Studio keys, or `vertex` when using Google Cloud Vertex AI.
+-   `GEMINI_VERTEX_REGION`, `GEMINI_VERTEX_PROJECT`: Only required when `GEMINI_PROVIDER=vertex`; leave the defaults untouched if you stay on AI Studio.
+-   `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, `OPENROUTER_HTTP_REFERER`, `OPENROUTER_TITLE`: Optional OpenRouter fallback configuration present in `.env`. Remove or replace with your own values if you use OpenRouter as a secondary model provider.
+-   `SEED_USERNAME`, `SEED_PASSWORD`: Credentials for the initial user inserted at startup. Customize before deploying; the sample file uses `rong_wu` / `mit!23456`.
+-   `JWT_SECRET_KEY`: Symmetric key for signing access tokens; change for any non-local environment.
+-   `JWT_ALGORITHM`: Signing algorithm (defaults to `HS256`).
+-   `ACCESS_TOKEN_EXPIRE_MINUTES`: Access token lifetime in minutes (sample file uses 120).
+-   `GOOGLE_APPLICATION_CREDENTIALS`: Optional environment variable (not set in `.env`) pointing to your Google Cloud service account JSON when using services like Speech-to-Text.
+-   `DATABASE_URL`: Optional override for the default SQLite database (commented out in `.env`; supply a SQLAlchemy-compatible URL for Postgres, etc.).
+
 ### 4. Run the Application
 
 You can run the server using the provided shell script.
